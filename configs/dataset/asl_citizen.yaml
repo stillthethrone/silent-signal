@@ -1,0 +1,44 @@
+schema_version: 1
+
+# ASL Citizen Version 1.0. Counts are checked against the official CSVs.
+# https://www.microsoft.com/en-us/research/project/asl-citizen/
+dataset:
+  name: asl_citizen
+  adapter: asl_citizen
+  root: ${ASL_CITIZEN_ROOT}
+  video_extension: .mp4
+  views:
+    single:
+      directory: videos
+  metadata_splits:
+    train: splits/train.csv
+    validation: splits/val.csv
+    test: splits/test.csv
+
+expected:
+  clips: 83399
+  glosses: 2731
+  signers: 52
+  views_per_instance: 1
+  # Recording FPS and resolution vary; probe them rather than imposing VSL values.
+  enforce_counts: true
+  split_clips:
+    train: 40154
+    validation: 10304
+    test: 32941
+  split_signers:
+    train: 35
+    validation: 6
+    test: 11
+
+split:
+  # Keep exact CSV membership. There is no random re-split or ratio fallback.
+  strategy: official
+
+outputs:
+  manifest_csv: data/manifests/asl_citizen.csv
+  manifest_parquet: data/manifests/asl_citizen.parquet
+  labels: data/labels/asl_citizen_labels.json
+  split: data/splits/asl_citizen_official.json
+  report: artifacts/runs/asl-citizen-preparation/validation_report.json
+  invalid_records: artifacts/runs/asl-citizen-preparation/invalid_records.csv

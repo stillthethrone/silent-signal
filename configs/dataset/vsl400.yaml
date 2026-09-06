@@ -2,6 +2,7 @@ schema_version: 1
 
 dataset:
   name: vsl400
+  adapter: vsl400
   root: ${VSL400_ROOT}
   video_extension: .mp4
   gloss_file: gloss.csv

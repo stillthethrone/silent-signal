@@ -1,7 +1,8 @@
-"""Deterministic signer-disjoint splits for VSL400."""
+"""Deterministic signer allocation and verified official dataset splits."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 import random
 from collections import Counter, defaultdict
@@ -93,6 +94,88 @@ def load_signer_allocation(path: str | Path) -> dict[str, tuple[str, ...]]:
             raise SplitError(f"signer_ids.{split} must be a list of signer ids.")
         result[split] = tuple(sorted(_normalize_signer(value) for value in values))
     return result
+
+
+def verify_official_split(
+    records: Sequence[ManifestRecord],
+    *,
+    source_records: Sequence[ManifestRecord],
+    source_files: dict[str, dict[str, str]] | None = None,
+) -> tuple[tuple[ManifestRecord, ...], SplitDefinition]:
+    """Keep every official assignment and reject altered or incomplete manifests.
+
+    ``source_records`` must come from the release CSVs, not the manifest being
+    checked. Media validation fields may change, but sample identities, labels
+    and official split membership may not. No seed or balancing is applied.
+    """
+
+    if not records or not source_records:
+        raise SplitError("Cannot verify an empty official split.")
+    source_by_id = {record.sample_id: record for record in source_records}
+    by_id = {record.sample_id: record for record in records}
+    if len(source_by_id) != len(source_records) or len(by_id) != len(records):
+        raise SplitError("Duplicate sample ids in official split or manifest.")
+    if set(by_id) != set(source_by_id):
+        raise SplitError(
+            "Manifest samples differ from the official CSVs; "
+            f"missing={len(set(source_by_id) - set(by_id))}, "
+            f"extra={len(set(by_id) - set(source_by_id))}. Rebuild the full manifest."
+        )
+    identity_fields = (
+        "sample_id",
+        "instance_id",
+        "video_id",
+        "signer_id",
+        "gloss_id",
+        "gloss_name",
+        "class_index",
+        "view",
+        "video_path",
+        "split",
+        "asl_lex_code",
+    )
+    for sample_id, record in by_id.items():
+        source = source_by_id[sample_id]
+        if any(getattr(record, key) != getattr(source, key) for key in identity_fields):
+            raise SplitError(f"Manifest sample {sample_id!r} differs from its official CSV row.")
+    if {record.split for record in records} != set(_SPLITS):
+        raise SplitError("Official CSVs must assign samples to train, validation and test.")
+    paths = [record.video_path for record in records]
+    if len(set(paths)) != len(paths):
+        raise SplitError("Duplicate video paths in official splits.")
+    _validate_instance_ownership(records)
+    allocation = {
+        split: tuple(sorted({record.signer_id for record in records if record.split == split}))
+        for split in _SPLITS
+    }
+    for first, second in (("train", "validation"), ("train", "test"), ("validation", "test")):
+        overlap = set(allocation[first]) & set(allocation[second])
+        if overlap:
+            raise SplitError(
+                f"Signer overlap between official {first}/{second}: {sorted(overlap)}."
+            )
+    instances: dict[str, str | None] = {}
+    for record in records:
+        if record.instance_id in instances and instances[record.instance_id] != record.split:
+            raise SplitError("Instance overlap between official splits.")
+        instances[record.instance_id] = record.split
+    train_labels = {record.class_index for record in records if record.split == "train"}
+    if any(record.class_index not in train_labels for record in records):
+        raise SplitError("Official evaluation contains a class absent from training.")
+    definition = _make_definition(records, allocation, {}, seed=None, score=None)
+    assignments = [
+        [getattr(by_id[sample_id], key) for key in identity_fields] for sample_id in sorted(by_id)
+    ]
+    digest = hashlib.sha256(
+        json.dumps(assignments, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    definition = replace(
+        definition,
+        strategy="official",
+        source_files=source_files or {},
+        assignments_sha256=digest,
+    )
+    return tuple(records), definition
 
 
 def write_split_definition(definition: SplitDefinition, path: str | Path) -> None:
@@ -226,8 +309,8 @@ def _make_definition(
     allocation: Mapping[str, Sequence[str]],
     ratios: dict[str, float],
     *,
-    seed: int,
-    score: float,
+    seed: int | None,
+    score: float | None,
 ) -> SplitDefinition:
     return SplitDefinition(
         seed=seed,

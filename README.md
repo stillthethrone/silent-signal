@@ -1,9 +1,77 @@
 # Silent Signal
 
-Research-grade Vietnamese isolated sign-language recognition, beginning with a
-reproducible VSL400 data foundation. The first implemented milestone prepares,
-validates, and splits the controlled-access videos; it deliberately does **not**
-run whole-body pose extraction yet.
+Reproducible isolated sign-language recognition research with ASL Citizen
+(American Sign Language) and VSL400 (Vietnamese Sign Language). The implemented
+milestone prepares and validates data, imports ASL Citizen's official splits,
+and supports VSL400 signer allocation. Pose extraction and model training remain
+unimplemented scaffolding.
+
+## ASL Citizen preparation
+
+The adapter reads the official release's `splits/train.csv`, `splits/val.csv`
+and `splits/test.csv`, preserving each video's filename, participant ID, gloss
+and split. It uses the 2,731 training glosses as class labels. `ASL-LEX Code`
+is retained as an optional annotation, not used as a unique class identifier.
+
+ASL Citizen Version 1.0 contains 83,399 videos from 52 signers:
+
+| Split | Videos | Signers |
+| --- | ---: | ---: |
+| Train | 40,154 | 35 |
+| Validation | 10,304 | 6 |
+| Test | 32,941 | 11 |
+
+These assignments are imported exactly, not regenerated from percentages.
+The pipeline rejects duplicate samples, signer leakage, missing split files,
+unseen evaluation labels and changes to the official manifest membership.
+File checks, FFmpeg validation and CSV/Parquet output are shared with VSL400.
+
+Expected release layout:
+
+```text
+ASL_Citizen/
+├── videos/
+├── splits/
+│   ├── train.csv
+│   ├── val.csv
+│   └── test.csv
+└── use.txt
+```
+
+Install once with `uv sync --extra dev`, then prepare the extracted dataset:
+
+```powershell
+uv run ss-prepare all --config configs/dataset/asl_citizen.yaml --root C:/datasets/ASL_Citizen --level metadata
+uv run ss-prepare all --config configs/dataset/asl_citizen.yaml --root C:/datasets/ASL_Citizen --level probe --workers 4
+```
+
+Alternatively set `ASL_CITIZEN_ROOT` and omit `--root`. The command writes
+`data/manifests/asl_citizen.csv` and `.parquet`,
+`data/labels/asl_citizen_labels.json`, `data/splits/asl_citizen_official.json`,
+and validation reports under `artifacts/runs/asl-citizen-preparation/`.
+Always check the command exit code and report `passed`; global count errors
+can occur even if every individual row has `is_valid=true`.
+
+For Google Colab, open
+[00_asl_citizen_colab_preparation.ipynb](notebooks/00_asl_citizen_colab_preparation.ipynb).
+It clones the project's `dev` branch, downloads the official ZIP when enabled,
+checks extraction space, imports the official CSVs, and stores preparation
+outputs and resumable validation progress in Drive. Push this implementation
+to the selected branch before running it. No Zenodo token is needed.
+
+The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
+files need roughly 89 GiB together, before extra working space or pose caches;
+check the actual Colab disk quota before downloading. See the notebook and
+[ASL Citizen implementation notes](docs/asl_citizen.md) for provenance, workflow
+and resource requirements.
+
+ASL Citizen is available under
+[Microsoft's research dataset license](https://www.microsoft.com/en-us/research/project/asl-citizen/dataset-license/)
+for non-commercial, non-revenue-generating research, with restrictions on
+redistribution. Download it from the
+[official project page](https://www.microsoft.com/en-us/research/project/asl-citizen/).
+An ASL-trained recognizer is not a Vietnamese sign-language recognizer;
+transfer to VSL requires separate training and evaluation.
 
 ## Implemented milestone: VSL400 preparation
 
@@ -91,7 +159,7 @@ source release must never be committed.
 
 The data contract is documented in docs/data_contract.md.
 
-## Google Colab
+## VSL400 on Google Colab
 
 Use
 [notebooks/00_vsl400_colab_preparation.ipynb](notebooks/00_vsl400_colab_preparation.ipynb)
