@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "silent-signal"
+version = "0.1.0"
+description = "Reproducible Vietnamese sign-language recognition research pipeline."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Proprietary" }
+authors = [{ name = "Silent Signal contributors" }]
+dependencies = [
+  "pyarrow>=18.0",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.14",
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.9",
+  "types-PyYAML>=6.0.12",
+]
+
+[project.scripts]
+silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
+ss-prepare = "silent_signal.cli.prepare:entrypoint"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/silent_signal"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --strict-config --strict-markers"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+extend-exclude = ["notebooks/*.ipynb"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["silent_signal"]
+exclude = ["src/silent_signal/(models|pose|training|evaluation|inference|export|api)/"]
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
