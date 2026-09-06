@@ -1,4 +1,4 @@
-"""Build and serialize a canonical multi-view VSL400 manifest."""
+"""Build and serialize canonical manifests with dataset-specific ingestion."""
 
 from __future__ import annotations
 
@@ -59,7 +59,19 @@ class _RawRecord:
 
 
 def build_manifest(config: DatasetConfig) -> ManifestBuildResult:
-    """Parse all configured views and normalize them into one manifest."""
+    """Dispatch source parsing while preserving the shared manifest contract."""
+
+    if config.adapter == "asl_citizen":
+        from silent_signal.data.adapters.asl_citizen import build_asl_citizen_manifest
+
+        return build_asl_citizen_manifest(config)
+    if config.adapter != "vsl400":
+        raise ManifestError(f"Unsupported dataset adapter: {config.adapter!r}.")
+    return _build_vsl400_manifest(config)
+
+
+def _build_vsl400_manifest(config: DatasetConfig) -> ManifestBuildResult:
+    """Preserve the existing VSL400 multiview JSON normalization."""
 
     if not config.root.is_dir():
         raise ManifestError(f"Dataset root does not exist: {config.root}")
@@ -171,14 +183,16 @@ def read_manifest(path: str | Path) -> tuple[ManifestRecord, ...]:
     raise ManifestError(f"Unsupported manifest format: {source.suffix}")
 
 
-def write_labels(labels: Sequence[LabelDefinition], path: str | Path) -> None:
+def write_labels(
+    labels: Sequence[LabelDefinition], path: str | Path, *, dataset: str = "vsl400"
+) -> None:
     """Persist both directions of the class vocabulary."""
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema_version": 1,
-        "dataset": "vsl400",
+        "dataset": dataset,
         "num_classes": len(labels),
         "labels": [asdict(item) for item in labels],
         "gloss_to_class_index": {item.gloss_name: item.class_index for item in labels},

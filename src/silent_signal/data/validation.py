@@ -1,4 +1,4 @@
-"""Integrity checks for VSL400 metadata and physical video files."""
+"""Shared integrity checks for metadata and physical video files."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from silent_signal.configuration import ExpectedConfig
-from silent_signal.contracts import ManifestRecord, ValidationIssue, ValidationLevel
+from silent_signal.contracts import ManifestRecord, SplitName, ValidationIssue, ValidationLevel
 from silent_signal.data.manifest import manifest_summary
 
 
@@ -123,6 +123,8 @@ def validate_manifest(
     _validate_expected_counts(records, expected, add_issue)
     _validate_unique_samples(records, add_issue)
     _validate_instance_groups(records, expected_views, add_issue)
+    if any(record.split is not None for record in records):
+        _validate_split_membership(records, add_issue)
 
     file_paths: dict[int, Path] = {}
     for index, record in enumerate(records):
@@ -319,6 +321,41 @@ def _validate_expected_counts(
                 f"Expected {target} {label}, found {actual}.",
                 severity=severity,
             )
+    for split, target in expected.split_clips.items():
+        actual = sum(record.split == split for record in records)
+        if actual != target:
+            add_issue(
+                "unexpected_split_clip_count",
+                f"Expected {target} clips in {split}, found {actual}.",
+                severity=severity,
+            )
+    for split, target in expected.split_signers.items():
+        actual = len({record.signer_id for record in records if record.split == split})
+        if actual != target:
+            add_issue(
+                "unexpected_split_signer_count",
+                f"Expected {target} signers in {split}, found {actual}.",
+                severity=severity,
+            )
+
+
+def _validate_split_membership(
+    records: Sequence[ManifestRecord], add_issue: Callable[..., None]
+) -> None:
+    valid_splits = {split.value for split in SplitName}
+    signer_splits: dict[str, set[str]] = defaultdict(set)
+    for index, record in enumerate(records):
+        if record.split not in valid_splits:
+            add_issue("invalid_split", "Missing or unsupported split membership.", index=index)
+        elif record.split is not None:
+            signer_splits[record.signer_id].add(record.split)
+    for index, record in enumerate(records):
+        if len(signer_splits[record.signer_id]) > 1:
+            add_issue(
+                "signer_split_overlap",
+                "Signer occurs in multiple train/validation/test partitions.",
+                index=index,
+            )
 
 
 def _validate_unique_samples(
@@ -361,7 +398,11 @@ def _validate_instance_groups(
                 detail += f"; extra {extra}"
             for index in indices:
                 add_issue(
-                    "incomplete_multiview_instance",
+                    (
+                        "incomplete_multiview_instance"
+                        if len(expected_set) > 1
+                        else "invalid_singleview_instance"
+                    ),
                     detail,
                     index=index,
                     instance_id=instance_id,

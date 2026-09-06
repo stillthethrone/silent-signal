@@ -9,11 +9,12 @@ from typing import Any
 
 
 class View(StrEnum):
-    """Canonical VSL400 camera names."""
+    """Camera labels; single makes no synchronized multiview claim."""
 
     FRONT = "front"
     LEFT = "left"
     RIGHT = "right"
+    SINGLE = "single"
 
 
 class SplitName(StrEnum):
@@ -69,6 +70,7 @@ class ManifestRecord:
     is_valid: bool = True
     validation_errors: tuple[str, ...] = field(default_factory=tuple)
     split: str | None = None
+    asl_lex_code: str | None = None
 
     def to_dict(self, *, csv_safe: bool = False) -> dict[str, Any]:
         """Return a serialization-friendly representation."""
@@ -114,6 +116,7 @@ class ManifestRecord:
         normalized["is_valid"] = _as_bool(normalized.get("is_valid", True))
         normalized["split"] = _optional_str(normalized.get("split"))
         normalized["codec"] = _optional_str(normalized.get("codec"))
+        normalized["asl_lex_code"] = _optional_str(normalized.get("asl_lex_code"))
         return cls(**normalized)
 
 
@@ -136,19 +139,31 @@ class ValidationIssue:
 class SplitDefinition:
     """Reproducible signer allocation and its measured statistics."""
 
-    seed: int
+    seed: int | None
     target_ratios: dict[str, float]
     signer_ids: dict[str, tuple[str, ...]]
     signer_counts: dict[str, int]
     instance_counts: dict[str, int]
     clip_counts: dict[str, int]
     gloss_counts: dict[str, int]
-    score: float
+    score: float | None
+    strategy: str = "signer_disjoint"
+    source_files: dict[str, dict[str, str]] = field(default_factory=dict)
+    assignments_sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         value = asdict(self)
         value["schema_version"] = 1
-        value["strategy"] = "signer_disjoint"
+        value["strategy"] = self.strategy
+        if self.strategy == "official":
+            total = sum(self.clip_counts.values())
+            value["observed_ratios"] = {
+                split: count / total if total else 0.0 for split, count in self.clip_counts.items()
+            }
+        if not self.source_files:
+            value.pop("source_files")
+        if self.assignments_sha256 is None:
+            value.pop("assignments_sha256")
         value["signer_ids"] = {split: list(signers) for split, signers in self.signer_ids.items()}
         return value
 

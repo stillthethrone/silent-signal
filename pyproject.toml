@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "silent-signal"
 version = "0.1.0"
-description = "Reproducible Vietnamese sign-language recognition research pipeline."
+description = "Reproducible ASL Citizen and VSL400 sign-language research pipeline."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "Proprietary" }

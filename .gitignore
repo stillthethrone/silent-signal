@@ -24,5 +24,10 @@ data/processed/**
 artifacts/runs/**
 artifacts/releases/**
 
+# ASL Citizen generated metadata (rebuild from the official release).
+data/manifests/asl_citizen.*
+data/labels/asl_citizen_labels.json
+data/splits/asl_citizen_official.json
+
 # Notebook state
 .ipynb_checkpoints/
