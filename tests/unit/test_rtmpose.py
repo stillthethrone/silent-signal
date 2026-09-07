@@ -56,10 +56,7 @@ def test_config_loader_requires_explicit_model_paths_and_resolves_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     mmpose_root = tmp_path / "mmpose"
-    pose_config = (
-        mmpose_root
-        / "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py"
-    )
+    pose_config = mmpose_root / "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py"
     detector_config = mmpose_root / "rtmdet_m_coco-person.py"
     pose_checkpoint = tmp_path / "pose.pth"
     detector_checkpoint = tmp_path / "detector.pth"

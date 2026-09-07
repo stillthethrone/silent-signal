@@ -206,8 +206,7 @@ def read_pose_cache(
             envelope = json.loads(archive["metadata_json"].tobytes().decode("utf-8"))
             if envelope.get("schema_version") != POSE_CACHE_SCHEMA_VERSION:
                 raise PoseCacheError(
-                    "Unsupported pose cache schema_version: "
-                    f"{envelope.get('schema_version')!r}."
+                    f"Unsupported pose cache schema_version: {envelope.get('schema_version')!r}."
                 )
             sequence = RawPoseSequence(
                 sample_id=str(envelope["sample_id"]),
@@ -229,8 +228,7 @@ def read_pose_cache(
 
     if expected_sample_id is not None and sequence.sample_id != expected_sample_id:
         raise PoseCacheError(
-            f"Cache sample mismatch: expected {expected_sample_id!r}, "
-            f"found {sequence.sample_id!r}."
+            f"Cache sample mismatch: expected {expected_sample_id!r}, found {sequence.sample_id!r}."
         )
     _check_metadata_identity(sequence, "extractor_fingerprint", expected_fingerprint)
     _check_metadata_identity(sequence, "video_sha256", expected_video_sha256)

@@ -34,12 +34,8 @@ from silent_signal.pose.rtmpose import (
 
 _DEFAULT_CONFIG = Path("configs/pose/rtmpose.yaml")
 _DEFAULT_MANIFEST = Path("data/manifests/asl_citizen.parquet")
-_DEFAULT_OUTPUT_ROOT = Path(
-    "data/processed/pose/asl_citizen/rtmpose_l_coco_wholebody_384x288/raw"
-)
-_DEFAULT_REPORT = Path(
-    "artifacts/runs/pose-extraction/rtmpose_l_coco_wholebody_384x288.json"
-)
+_DEFAULT_OUTPUT_ROOT = Path("data/processed/pose/asl_citizen/rtmpose_l_coco_wholebody_384x288/raw")
+_DEFAULT_REPORT = Path("artifacts/runs/pose-extraction/rtmpose_l_coco_wholebody_384x288.json")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -57,8 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser(
         "verify",
         help=(
-            "Verify artifact paths and print their full SHA-256 provenance without "
-            "loading models."
+            "Verify artifact paths and print their full SHA-256 provenance without loading models."
         ),
     )
     verify.add_argument("--config", type=Path, default=_DEFAULT_CONFIG)

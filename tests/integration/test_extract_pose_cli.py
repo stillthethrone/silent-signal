@@ -54,8 +54,7 @@ def _write_pose_config(path: Path) -> None:
                     "hash_source_video": True,
                     "pose_model": {
                         "config": str(
-                            path.parent
-                            / "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py"
+                            path.parent / "rtmpose-l_8xb32-270e_coco-wholebody-384x288.py"
                         ),
                         "checkpoint": str(path.parent / "pose.pth"),
                         "checkpoint_url": "https://example.test/pose.pth",
@@ -167,6 +166,4 @@ def test_record_shards_are_sorted_deterministic_and_disjoint() -> None:
 
     assert [record.sample_id for record in first] == ["a", "c", "e"]
     assert [record.sample_id for record in second] == ["b", "d"]
-    assert {record.sample_id for record in first}.isdisjoint(
-        record.sample_id for record in second
-    )
+    assert {record.sample_id for record in first}.isdisjoint(record.sample_id for record in second)

@@ -280,9 +280,7 @@ def _build_asl_layout() -> PoseLayout:
 
 
 ASL_CITIZEN_WHOLEBODY_V1: Final = _build_asl_layout()
-POSE_LAYOUTS: Final = MappingProxyType(
-    {ASL_CITIZEN_WHOLEBODY_V1.name: ASL_CITIZEN_WHOLEBODY_V1}
-)
+POSE_LAYOUTS: Final = MappingProxyType({ASL_CITIZEN_WHOLEBODY_V1.name: ASL_CITIZEN_WHOLEBODY_V1})
 
 
 def get_pose_layout(name: str) -> PoseLayout:

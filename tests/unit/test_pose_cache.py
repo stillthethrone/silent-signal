@@ -26,9 +26,7 @@ def _sequence() -> RawPoseSequence:
         frame_size_hw=(480, 640),
         keypoints_xy=np.ones((frame_count, 133, 2), dtype=np.float32),
         keypoint_scores=np.full((frame_count, 133), 0.9, dtype=np.float32),
-        bboxes_xyxy=np.tile(
-            np.asarray([10, 20, 300, 450], dtype=np.float32), (frame_count, 1)
-        ),
+        bboxes_xyxy=np.tile(np.asarray([10, 20, 300, 450], dtype=np.float32), (frame_count, 1)),
         bbox_scores=np.full((frame_count,), 0.95, dtype=np.float32),
         person_detected=np.ones((frame_count,), dtype=np.bool_),
         metadata={
@@ -81,6 +79,4 @@ def test_sha256_file_returns_full_digest(tmp_path: Path) -> None:
     path = tmp_path / "artifact.pth"
     path.write_bytes(b"checkpoint")
 
-    assert sha256_file(path) == (
-        "47320987f9a49d5b00119b960f247a956773f57543982b8bfcb6da5bb3afd9ef"
-    )
+    assert sha256_file(path) == ("47320987f9a49d5b00119b960f247a956773f57543982b8bfcb6da5bb3afd9ef")

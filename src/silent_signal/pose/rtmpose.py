@@ -161,8 +161,7 @@ class RTMPoseWholeBodyConfig:
         """Verify all local artifacts and return the complete extractor identity."""
 
         if require_pinned_checkpoints and (
-            self.pose_model.checkpoint_sha256 is None
-            or self.detector.checkpoint_sha256 is None
+            self.pose_model.checkpoint_sha256 is None or self.detector.checkpoint_sha256 is None
         ):
             raise RTMPoseConfigurationError(
                 "Production extraction requires full checkpoint_sha256 pins for both "
@@ -276,9 +275,7 @@ def load_rtmpose_config(path: str | Path) -> RTMPoseWholeBodyConfig:
             detector_score_weight=float(selection_raw.get("detector_score_weight", 0.20)),
             center_weight=float(selection_raw.get("center_weight", 0.20)),
             area_weight=float(selection_raw.get("area_weight", 0.10)),
-            continuity_iou_weight=float(
-                selection_raw.get("continuity_iou_weight", 0.50)
-            ),
+            continuity_iou_weight=float(selection_raw.get("continuity_iou_weight", 0.50)),
         ),
         hash_source_video=bool(extractor.get("hash_source_video", True)),
     )
@@ -375,9 +372,7 @@ class RTMPoseWholeBodyExtractor:
                 )
                 if selected is None:
                     keypoints.append(np.zeros((COCO_WHOLEBODY_KEYPOINTS, 2), dtype=np.float32))
-                    keypoint_scores.append(
-                        np.zeros((COCO_WHOLEBODY_KEYPOINTS,), dtype=np.float32)
-                    )
+                    keypoint_scores.append(np.zeros((COCO_WHOLEBODY_KEYPOINTS,), dtype=np.float32))
                     bboxes.append(np.zeros((4,), dtype=np.float32))
                     bbox_scores.append(0.0)
                     detected.append(False)
