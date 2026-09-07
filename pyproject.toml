@@ -11,6 +11,7 @@ requires-python = ">=3.11,<3.14"
 license = { text = "Proprietary" }
 authors = [{ name = "Silent Signal contributors" }]
 dependencies = [
+  "numpy>=1.26,<2",
   "pyarrow>=18.0",
   "PyYAML>=6.0.2",
 ]
@@ -27,6 +28,7 @@ dev = [
 [project.scripts]
 silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-prepare = "silent_signal.cli.prepare:entrypoint"
+ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]
