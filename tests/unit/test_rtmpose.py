@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
@@ -16,6 +19,7 @@ from silent_signal.pose.rtmpose import (
     RTMPoseConfigurationError,
     RTMPoseWholeBodyConfig,
     RTMPoseWholeBodyExtractor,
+    _OpenMMLabRuntime,
     bbox_iou,
     expand_bbox,
     load_rtmpose_config,
@@ -151,6 +155,73 @@ def test_primary_detection_prefers_temporal_signer_and_expands_safely() -> None:
     assert selected is continuing
     assert bbox_iou(previous, continuing.bbox_xyxy) > 0.8
     np.testing.assert_array_equal(expanded, np.asarray([0, 0, 199, 199], dtype=np.float32))
+
+
+class _FakeInstances:
+    def __init__(self, **values: np.ndarray) -> None:
+        self.__dict__.update(values)
+
+    def cpu(self) -> _FakeInstances:
+        return self
+
+    def numpy(self) -> _FakeInstances:
+        return self
+
+
+def test_openmmlab_runtime_switches_registry_scope_for_each_framework() -> None:
+    runtime = _OpenMMLabRuntime.__new__(_OpenMMLabRuntime)
+    events: list[str] = []
+
+    @contextmanager
+    def scope_context(scope: str) -> Iterator[None]:
+        events.append(f"scope:{scope}")
+        yield
+
+    runtime._scope_context = scope_context
+    runtime._detector = object()
+    runtime._pose_model = object()
+    runtime._person_category_id = 0
+
+    def inference_detector(_model: object, _frame: np.ndarray) -> SimpleNamespace:
+        events.append("infer:detector")
+        return SimpleNamespace(
+            pred_instances=_FakeInstances(
+                bboxes=np.asarray([[1, 2, 20, 30]], dtype=np.float32),
+                scores=np.asarray([0.9], dtype=np.float32),
+                labels=np.asarray([0], dtype=np.int64),
+            )
+        )
+
+    def inference_topdown(
+        _model: object, _frame: np.ndarray, _bboxes: np.ndarray
+    ) -> list[SimpleNamespace]:
+        events.append("infer:pose")
+        return [
+            SimpleNamespace(
+                pred_instances=_FakeInstances(
+                    keypoints=np.ones((1, 133, 2), dtype=np.float32),
+                    keypoint_scores=np.full((1, 133), 0.8, dtype=np.float32),
+                )
+            )
+        ]
+
+    runtime._inference_detector = inference_detector
+    runtime._inference_topdown = inference_topdown
+    frame = np.zeros((32, 32, 3), dtype=np.uint8)
+    detections = runtime.detect_people(frame)
+    pose = runtime.estimate_pose(
+        frame,
+        detections[0].bbox_xyxy,
+        bbox_score=detections[0].score,
+    )
+
+    assert events == [
+        "scope:mmdet",
+        "infer:detector",
+        "scope:mmpose",
+        "infer:pose",
+    ]
+    assert pose.keypoints_xy.shape == (133, 2)
 
 
 class _FakeCapture:

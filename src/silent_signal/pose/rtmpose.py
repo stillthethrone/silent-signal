@@ -434,9 +434,13 @@ class _OpenMMLabRuntime:
     """Lazy adapter around MMDetection 3.x and MMPose 1.x APIs."""
 
     def __init__(self, config: RTMPoseWholeBodyConfig) -> None:
+        # Colab exports its notebook-only inline backend to child processes. The
+        # extraction CLI is headless, so importing OpenMMLab must not inherit it.
+        os.environ["MPLBACKEND"] = "Agg"
         try:
             from mmdet.apis import inference_detector, init_detector
             from mmdet.utils import register_all_modules as register_mmdet_modules
+            from mmengine import DefaultScope
             from mmpose.apis import inference_topdown, init_model
             from mmpose.utils import register_all_modules as register_mmpose_modules
         except ImportError as exc:
@@ -446,6 +450,7 @@ class _OpenMMLabRuntime:
             ) from exc
         register_mmdet_modules(init_default_scope=False)
         register_mmpose_modules(init_default_scope=True)
+        self._scope_context = DefaultScope.overwrite_default_scope
         self._inference_detector = inference_detector
         self._inference_topdown = inference_topdown
         try:
@@ -465,7 +470,12 @@ class _OpenMMLabRuntime:
 
     def detect_people(self, frame: NDArray[np.uint8]) -> tuple[DetectionCandidate, ...]:
         try:
-            result = self._inference_detector(self._detector, frame)
+            # MMPose inference leaves the process-wide default scope at
+            # ``mmpose``. MMDetection 3.2 builds its test transforms lazily, so
+            # restore ``mmdet`` before every frame or PackDetInputs is looked up
+            # in the wrong registry.
+            with self._scope_context("mmdet"):
+                result = self._inference_detector(self._detector, frame)
             instances = result.pred_instances.cpu().numpy()
             bboxes = np.asarray(instances.bboxes, dtype=np.float32)
             scores = np.asarray(instances.scores, dtype=np.float32)
@@ -486,11 +496,12 @@ class _OpenMMLabRuntime:
         bbox_score: float,
     ) -> PoseCandidate:
         try:
-            results = self._inference_topdown(
-                self._pose_model,
-                frame,
-                np.asarray([bbox_xyxy], dtype=np.float32),
-            )
+            with self._scope_context("mmpose"):
+                results = self._inference_topdown(
+                    self._pose_model,
+                    frame,
+                    np.asarray([bbox_xyxy], dtype=np.float32),
+                )
             if len(results) != 1:
                 raise PoseExtractionError(
                     f"RTMPose returned {len(results)} samples for one person bbox."
