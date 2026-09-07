@@ -2,9 +2,10 @@
 
 Reproducible isolated sign-language recognition research with ASL Citizen
 (American Sign Language) and VSL400 (Vietnamese Sign Language). The implemented
-milestone prepares and validates data, imports ASL Citizen's official splits,
-and supports VSL400 signer allocation. Pose extraction and model training remain
-unimplemented scaffolding.
+milestones prepare and validate data, import ASL Citizen's official splits,
+support VSL400 signer allocation, and provide reproducible offline whole-body
+pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. Model
+training remains unimplemented scaffolding.
 
 ## ASL Citizen preparation
 
@@ -52,8 +53,40 @@ and validation reports under `artifacts/runs/asl-citizen-preparation/`.
 Always check the command exit code and report `passed`; global count errors
 can occur even if every individual row has `is_valid=true`.
 
+## RTMPose-L WholeBody extraction
+
+The pose pipeline uses MMPose as the framework, RTMDet for person detection and
+the explicit COCO-WholeBody RTMPose-L 384x288 model for all 133 raw keypoints.
+It does not use MMPose's mutable `wholebody` alias. Atomic caches retain source
+coordinates and complete artifact/software provenance for later derivation of
+the 75-node Graph-Spatial-Temporal Transformer layout.
+
+Verify the local config/checkpoint files and calculate their full SHA-256 values:
+
+```powershell
+uv run ss-extract-pose verify --config configs/pose/rtmpose.yaml
+```
+
+Then run a small ASL Citizen pilot:
+
+```powershell
+uv run ss-extract-pose extract --config configs/pose/rtmpose.yaml `
+  --manifest data/manifests/asl_citizen.parquet `
+  --dataset-root D:/datasets/ASL_Citizen --split train --limit 100
+```
+
+See [the extraction contract and environment guide](docs/pose_extraction.md)
+before downloading models or starting a production run.
+
 For Google Colab, open
 [00_asl_citizen_colab_preparation.ipynb](notebooks/00_asl_citizen_colab_preparation.ipynb).
+After data validation passes, use
+[03_rtmpose_wholebody_colab_check.ipynb](notebooks/03_rtmpose_wholebody_colab_check.ipynb)
+to verify the pinned OpenMMLab environment, download and hash the explicit
+RTMDet-M/RTMPose-L artifacts, extract a smoke sample, inspect its raw 133-point
+cache and validate resume behavior. It can also be opened directly in
+[Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/dev/notebooks/03_rtmpose_wholebody_colab_check.ipynb)
+after the notebook has been pushed to the `dev` branch.
 It clones the project's `dev` branch, downloads the official ZIP when enabled,
 checks extraction space, imports the official CSVs, and stores preparation
 outputs and resumable validation progress in Drive. Push this implementation

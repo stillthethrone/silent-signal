@@ -23,6 +23,7 @@ data/raw/**
 data/processed/**
 artifacts/runs/**
 artifacts/releases/**
+artifacts/pretrained/**
 
 # ASL Citizen generated metadata (rebuild from the official release).
 data/manifests/asl_citizen.*
