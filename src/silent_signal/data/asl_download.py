@@ -6,6 +6,7 @@ The official archive URL is published on the Microsoft Research project page.
 
 from __future__ import annotations
 
+import io
 import json
 import re
 import shutil
@@ -14,6 +15,7 @@ import tempfile
 import urllib.request
 import zipfile
 import zlib
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -24,6 +26,9 @@ ASL_CITIZEN_URL = (
     "b88c0bae-e6c1-43e1-8726-98cf5af36ca4/ASL_Citizen.zip"
 )
 _CHUNK_SIZE = 8 * 1024**2
+_REMOTE_CHUNK_SIZE = 64 * 1024**2
+_REMOTE_CACHE_BLOCKS = 2
+_REMOTE_STATE_NAME = ".silent-signal-remote-archive.json"
 _SPACE_MARGIN = 2 * 1024**3
 _RANGE = re.compile(r"bytes (\d+)-(\d+)/(\d+)")
 
@@ -39,6 +44,146 @@ class ArchiveInspection:
     prefix: str
     file_count: int
     uncompressed_bytes: int
+
+
+class _RemoteRangeReader(io.RawIOBase):
+    """Seekable, bounded-memory HTTP Range reader used by ``zipfile``."""
+
+    def __init__(
+        self,
+        remote: dict[str, Any],
+        *,
+        chunk_size: int = _REMOTE_CHUNK_SIZE,
+        cache_blocks: int = _REMOTE_CACHE_BLOCKS,
+    ) -> None:
+        super().__init__()
+        if chunk_size < 1 or cache_blocks < 1:
+            raise ValueError("chunk_size and cache_blocks must be positive")
+        self._remote = remote
+        self._size = int(remote["size"])
+        self._validator = _remote_validator(remote)
+        self._chunk_size = chunk_size
+        self._cache_blocks = cache_blocks
+        self._position = 0
+        self._cache: OrderedDict[int, bytes] = OrderedDict()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        return self._position
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        if whence == io.SEEK_SET:
+            position = offset
+        elif whence == io.SEEK_CUR:
+            position = self._position + offset
+        elif whence == io.SEEK_END:
+            position = self._size + offset
+        else:
+            raise ValueError(f"Unsupported seek mode: {whence}")
+        if position < 0:
+            raise ValueError("Negative seek position")
+        self._position = position
+        return position
+
+    def read(self, size: int = -1) -> bytes:
+        if self.closed:
+            raise ValueError("I/O operation on closed remote archive")
+        if self._position >= self._size or size == 0:
+            return b""
+        remaining = self._size - self._position
+        if size < 0 or size > remaining:
+            size = remaining
+        output = bytearray()
+        while size:
+            block_index = self._position // self._chunk_size
+            block = self._get_block(block_index)
+            block_offset = self._position - block_index * self._chunk_size
+            take = min(size, len(block) - block_offset)
+            if take <= 0:
+                raise ArchiveError("Remote archive returned an incomplete cached range.")
+            output.extend(block[block_offset : block_offset + take])
+            self._position += take
+            size -= take
+        return bytes(output)
+
+    def close(self) -> None:
+        self._cache.clear()
+        super().close()
+
+    def _get_block(self, block_index: int) -> bytes:
+        cached = self._cache.get(block_index)
+        if cached is not None:
+            self._cache.move_to_end(block_index)
+            return cached
+        start = block_index * self._chunk_size
+        end = min(self._size - 1, start + self._chunk_size - 1)
+        expected = end - start + 1
+        request = urllib.request.Request(
+            str(self._remote["url"]),
+            headers={
+                "Accept-Encoding": "identity",
+                "Range": f"bytes={start}-{end}",
+                "If-Range": self._validator,
+            },
+        )
+        with urllib.request.urlopen(request, timeout=300) as response:
+            if response.status != 206:
+                raise ArchiveError(
+                    "Server did not honor HTTP Range; direct extraction is unavailable."
+                )
+            match = _RANGE.fullmatch(response.headers.get("Content-Range", ""))
+            if not match or tuple(map(int, match.groups())) != (start, end, self._size):
+                raise ArchiveError("Server returned an unexpected Content-Range.")
+            if response.headers.get("Content-Encoding", "identity") != "identity":
+                raise ArchiveError("Unexpected HTTP content encoding for remote ZIP.")
+            length = response.headers.get("Content-Length")
+            if length and (not length.isdigit() or int(length) != expected):
+                raise ArchiveError("Server returned an unexpected range Content-Length.")
+            block = bytes(response.read(expected + 1))
+        if len(block) != expected:
+            raise ArchiveError(
+                f"Remote range is incomplete: received {len(block)}, expected {expected} bytes."
+            )
+        self._cache[block_index] = block
+        self._cache.move_to_end(block_index)
+        while len(self._cache) > self._cache_blocks:
+            self._cache.popitem(last=False)
+        return block
+
+
+def _remote_metadata(url: str) -> dict[str, Any]:
+    request = urllib.request.Request(
+        url,
+        method="HEAD",
+        headers={"Accept-Encoding": "identity"},
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        size_header = response.headers.get("Content-Length")
+        if not size_header or not size_header.isdigit() or int(size_header) <= 0:
+            raise ArchiveError("Server did not provide a positive archive Content-Length.")
+        return {
+            "url": url,
+            "size": int(size_header),
+            "etag": response.headers.get("ETag"),
+            "last_modified": response.headers.get("Last-Modified"),
+        }
+
+
+def _remote_validator(remote: dict[str, Any]) -> str:
+    etag = remote.get("etag")
+    if isinstance(etag, str) and etag and not etag.startswith("W/"):
+        return etag
+    last_modified = remote.get("last_modified")
+    if isinstance(last_modified, str) and last_modified:
+        return last_modified
+    raise ArchiveError(
+        "Server has no reliable ETag or Last-Modified validator for direct extraction."
+    )
 
 
 def download_archive(
@@ -60,17 +205,7 @@ def download_archive(
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_name(destination.name + ".part")
     metadata_path = destination.with_name(destination.name + ".download.json")
-    request = urllib.request.Request(url, method="HEAD", headers={"Accept-Encoding": "identity"})
-    with urllib.request.urlopen(request, timeout=60) as response:
-        size_header = response.headers.get("Content-Length")
-        if not size_header or not size_header.isdigit() or int(size_header) <= 0:
-            raise ArchiveError("Server did not provide a positive archive Content-Length.")
-        remote: dict[str, Any] = {
-            "url": url,
-            "size": int(size_header),
-            "etag": response.headers.get("ETag"),
-            "last_modified": response.headers.get("Last-Modified"),
-        }
+    remote = _remote_metadata(url)
     if metadata_path.is_file():
         previous = json.loads(metadata_path.read_text(encoding="utf-8"))
         if previous != remote:
@@ -166,51 +301,142 @@ def extract_archive(
     dataset_root.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(archive_path) as archive:
         _, members = _dataset_members(archive)
-        pending: list[tuple[zipfile.ZipInfo, Path]] = []
-        for item, relative in members:
-            target = dataset_root / relative
-            _check_target(dataset_root, target)
-            if item.is_dir():
-                if target.exists() and not target.is_dir():
-                    raise ArchiveError(f"An existing file blocks a directory: {target}")
-                continue
-            if target.exists():
-                if not target.is_file() or not _matches_entry(target, item):
-                    raise ArchiveError(f"Existing file differs from archive: {target}")
-            else:
-                pending.append((item, target))
-        required = sum(item.file_size for item, _ in pending)
-        _require_space(dataset_root, required, reserve_bytes)
-        report(f"Extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)")
-        for index, (item, target) in enumerate(pending, start=1):
-            target.parent.mkdir(parents=True, exist_ok=True)
-            temporary: Path | None = None
-            try:
-                with (
-                    archive.open(item) as source,
-                    tempfile.NamedTemporaryFile(
-                        prefix=".silent-signal-",
-                        suffix=".extracting",
-                        dir=target.parent,
-                        delete=False,
-                    ) as output,
-                ):
-                    temporary = Path(output.name)
-                    shutil.copyfileobj(source, output, length=_CHUNK_SIZE)
-                if temporary.stat().st_size != item.file_size:
-                    raise ArchiveError(
-                        f"Extracted file size differs from ZIP entry: {item.filename}"
-                    )
-                if target.exists():
-                    raise ArchiveError(f"A file appeared during extraction: {target}")
-                temporary.rename(target)
-            finally:
-                if temporary is not None and temporary.exists():
-                    temporary.unlink()
-            if index % 1000 == 0 or index == len(pending):
-                report(f"Extracted {index:,}/{len(pending):,}")
+        _extract_members(
+            archive,
+            members,
+            dataset_root,
+            reserve_bytes=reserve_bytes,
+            report=report,
+        )
     report(f"Dataset ready for metadata validation: {dataset_root}")
     return dataset_root
+
+
+def extract_remote_archive(
+    dataset_root: Path,
+    *,
+    url: str = ASL_CITIZEN_URL,
+    reserve_bytes: int = _SPACE_MARGIN,
+    range_chunk_size: int = _REMOTE_CHUNK_SIZE,
+    report: Callable[[str], None] = print,
+) -> Path:
+    """Extract the official ZIP through HTTP Range without storing the ZIP locally.
+
+    The central directory and compressed entries are fetched in cached chunks. Files
+    are extracted in archive order so requests stay mostly sequential. Completed files
+    are CRC-checked on a repeated call, and the remote identity is pinned under the
+    dataset root to prevent mixing releases after an interrupted Colab session.
+    """
+
+    dataset_root = Path(dataset_root).resolve()
+    dataset_root.mkdir(parents=True, exist_ok=True)
+    remote = _remote_metadata(url)
+    report(
+        f"Remote archive {int(remote['size']) / 1024**3:.2f} GiB; the ZIP will not be saved locally"
+    )
+    with (
+        _RemoteRangeReader(remote, chunk_size=range_chunk_size) as reader,
+        zipfile.ZipFile(reader) as archive,
+    ):
+        prefix, members = _dataset_members(archive)
+        if any(relative == Path(_REMOTE_STATE_NAME) for _, relative in members):
+            raise ArchiveError(f"Archive uses reserved path: {_REMOTE_STATE_NAME}")
+        report(f"Remote dataset root: {prefix or '(no outer directory)'}")
+        _record_remote_identity(dataset_root, remote)
+        _extract_members(
+            archive,
+            members,
+            dataset_root,
+            reserve_bytes=reserve_bytes,
+            report=report,
+        )
+    report(f"Dataset ready for metadata validation: {dataset_root}")
+    return dataset_root
+
+
+def _extract_members(
+    archive: zipfile.ZipFile,
+    members: list[tuple[zipfile.ZipInfo, Path]],
+    dataset_root: Path,
+    *,
+    reserve_bytes: int,
+    report: Callable[[str], None],
+) -> None:
+    pending: list[tuple[zipfile.ZipInfo, Path]] = []
+    for item, relative in members:
+        target = dataset_root / relative
+        _check_target(dataset_root, target)
+        if item.is_dir():
+            if target.exists() and not target.is_dir():
+                raise ArchiveError(f"An existing file blocks a directory: {target}")
+            continue
+        if target.exists():
+            if not target.is_file() or not _matches_entry(target, item):
+                raise ArchiveError(f"Existing file differs from archive: {target}")
+        else:
+            pending.append((item, target))
+    pending.sort(key=lambda pair: pair[0].header_offset)
+    required = sum(item.file_size for item, _ in pending)
+    _require_space(dataset_root, required, reserve_bytes)
+    report(f"Extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)")
+    for index, (item, target) in enumerate(pending, start=1):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with (
+                archive.open(item) as source,
+                tempfile.NamedTemporaryFile(
+                    prefix=".silent-signal-",
+                    suffix=".extracting",
+                    dir=target.parent,
+                    delete=False,
+                ) as output,
+            ):
+                temporary = Path(output.name)
+                shutil.copyfileobj(source, output, length=_CHUNK_SIZE)
+            if temporary.stat().st_size != item.file_size:
+                raise ArchiveError(f"Extracted file size differs from ZIP entry: {item.filename}")
+            if target.exists():
+                raise ArchiveError(f"A file appeared during extraction: {target}")
+            temporary.rename(target)
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+        if index % 1000 == 0 or index == len(pending):
+            report(f"Extracted {index:,}/{len(pending):,}")
+
+
+def _record_remote_identity(dataset_root: Path, remote: dict[str, Any]) -> None:
+    state_path = dataset_root / _REMOTE_STATE_NAME
+    if state_path.exists():
+        if state_path.is_symlink() or not state_path.is_file():
+            raise ArchiveError(f"Remote archive state is not a regular file: {state_path}")
+        try:
+            previous = json.loads(state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            raise ArchiveError(f"Remote archive state is unreadable: {state_path}") from error
+        if previous != remote:
+            raise ArchiveError(
+                "Remote archive identity changed; use a new empty DATASET_ROOT for this release."
+            )
+        return
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            prefix=".silent-signal-remote-",
+            suffix=".tmp",
+            dir=dataset_root,
+            delete=False,
+        ) as output:
+            temporary = Path(output.name)
+            json.dump(remote, output, indent=2)
+            output.write("\n")
+        temporary.replace(state_path)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
 
 
 def _dataset_members(archive: zipfile.ZipFile) -> tuple[str, list[tuple[zipfile.ZipInfo, Path]]]:

@@ -37,8 +37,18 @@ def test_notebook_is_valid_cleared_python() -> None:
             assert cell["execution_count"] is None
 
 
-def test_notebook_reserves_extraction_space_before_downloading(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("extract", "expected_reserve"),
+    [
+        (False, 2 * 1024**3),
+        (True, 49_604_368_459 + 2 * 1024**3),
+    ],
+)
+def test_notebook_reserves_only_requested_space_before_downloading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    extract: bool,
+    expected_reserve: int,
 ) -> None:
     calls: list[int] = []
 
@@ -51,10 +61,37 @@ def test_notebook_reserves_extraction_space_before_downloading(
         "ARCHIVE_PATH": tmp_path / "release/dataset.zip",
         "DATASET_ROOT": tmp_path / "dataset",
         "DOWNLOAD": True,
+        "EXTRACT": extract,
+        "STREAM_EXTRACT": False,
         "shutil": shutil,
     }
     exec(_code_cells()["download"], namespace)
-    assert calls == [49_604_368_459 + 2 * 1024**3]
+    assert calls == [expected_reserve]
+
+
+def test_notebook_stream_extract_dispatches_without_local_zip(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    destination = tmp_path / "ASL_Citizen"
+    calls: list[Path] = []
+
+    def extract(root: Path) -> Path:
+        calls.append(root)
+        (root / "videos").mkdir(parents=True)
+        (root / "splits").mkdir()
+        for split in ("train", "val", "test"):
+            (root / "splits" / f"{split}.csv").write_text("header\n", encoding="utf-8")
+        return root
+
+    monkeypatch.setattr("silent_signal.data.asl_download.extract_remote_archive", extract)
+    namespace = {
+        "ARCHIVE_PATH": tmp_path / "missing.zip",
+        "DATASET_ROOT": destination,
+        "STREAM_EXTRACT": True,
+        "EXTRACT": False,
+    }
+    exec(_code_cells()["extract"], namespace)
+    assert calls == [destination]
 
 
 def test_notebook_persists_outputs_and_resumes_partial_decode(

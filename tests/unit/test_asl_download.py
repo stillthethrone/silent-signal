@@ -14,6 +14,7 @@ from silent_signal.data.asl_download import (
     ArchiveError,
     download_archive,
     extract_archive,
+    extract_remote_archive,
     inspect_archive,
 )
 
@@ -111,6 +112,99 @@ def _archive(path: Path, prefix: str = "ASL_Citizen/") -> Path:
             archive.writestr(f"{prefix}splits/{split}.csv", "Participant ID,Video file,Gloss\n")
         archive.writestr(f"{prefix}videos/001.mp4", b"synthetic-video")
     return path
+
+
+def _mock_remote_archive(
+    monkeypatch: pytest.MonkeyPatch,
+    payload: bytes,
+    *,
+    etag: str = '"release-v1"',
+) -> list[urllib.request.Request]:
+    requests: list[urllib.request.Request] = []
+
+    def request(item: urllib.request.Request, **kwargs: Any) -> Response:
+        requests.append(item)
+        if item.get_method() == "HEAD":
+            return Response(
+                b"",
+                200,
+                {"Content-Length": str(len(payload)), "ETag": etag},
+            )
+        range_header = item.get_header("Range")
+        assert range_header is not None
+        start_text, end_text = range_header.removeprefix("bytes=").split("-", 1)
+        start, end = int(start_text), int(end_text)
+        data = payload[start : end + 1]
+        return Response(
+            data,
+            206,
+            {
+                "Content-Range": f"bytes {start}-{end}/{len(payload)}",
+                "Content-Length": str(len(data)),
+            },
+        )
+
+    monkeypatch.setattr(urllib.request, "urlopen", request)
+    return requests
+
+
+def test_remote_extract_uses_ranges_and_resumes_completed_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _archive(tmp_path / "dataset.zip")
+    requests = _mock_remote_archive(monkeypatch, archive.read_bytes())
+    destination = tmp_path / "data"
+
+    extract_remote_archive(
+        destination,
+        url="https://example.com/dataset.zip",
+        reserve_bytes=0,
+        range_chunk_size=64,
+    )
+    target = destination / "videos/001.mp4"
+    original = target.stat().st_mtime_ns
+    assert target.read_bytes() == b"synthetic-video"
+    assert (destination / ".silent-signal-remote-archive.json").is_file()
+    assert all(
+        request.get_header("Range") for request in requests if request.get_method() != "HEAD"
+    )
+    assert all(
+        request.get_header("If-range") == '"release-v1"'
+        for request in requests
+        if request.get_method() != "HEAD"
+    )
+
+    extract_remote_archive(
+        destination,
+        url="https://example.com/dataset.zip",
+        reserve_bytes=0,
+        range_chunk_size=64,
+    )
+    assert target.stat().st_mtime_ns == original
+
+
+def test_remote_extract_rejects_changed_release_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _archive(tmp_path / "dataset.zip")
+    payload = archive.read_bytes()
+    destination = tmp_path / "data"
+    _mock_remote_archive(monkeypatch, payload)
+    extract_remote_archive(
+        destination,
+        url="https://example.com/dataset.zip",
+        reserve_bytes=0,
+        range_chunk_size=64,
+    )
+
+    _mock_remote_archive(monkeypatch, payload, etag='"release-v2"')
+    with pytest.raises(ArchiveError, match="identity changed"):
+        extract_remote_archive(
+            destination,
+            url="https://example.com/dataset.zip",
+            reserve_bytes=0,
+            range_chunk_size=64,
+        )
 
 
 @pytest.mark.parametrize("prefix", ["", "ASL_Citizen/", "release/ASL_Citizen/"])
