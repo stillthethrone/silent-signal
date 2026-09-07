@@ -53,3 +53,13 @@ def test_pose_notebook_stream_extracts_official_dataset(
     }
     exec(_code_cells()["prepare-dataset"], namespace)
     assert calls == [(destination, 2 * 1024**3)]
+
+
+def test_pose_commands_use_a_headless_subprocess_environment() -> None:
+    cells = _code_cells()
+    smoke = cells["smoke-extraction"]
+    assert "POSE_PROCESS_ENV = os.environ.copy()" in smoke
+    assert "POSE_PROCESS_ENV['MPLBACKEND'] = 'Agg'" in smoke
+    assert "subprocess.run(smoke_command, env=POSE_PROCESS_ENV)" in smoke
+    assert "run(smoke_command, env=POSE_PROCESS_ENV)" in cells["resume-check"]
+    assert "subprocess.run(pilot_command, env=POSE_PROCESS_ENV)" in cells["pilot"]
