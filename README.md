@@ -82,7 +82,8 @@ For Google Colab, open
 [00_asl_citizen_colab_preparation.ipynb](notebooks/00_asl_citizen_colab_preparation.ipynb).
 After data validation passes, use
 [03_rtmpose_wholebody_colab_check.ipynb](notebooks/03_rtmpose_wholebody_colab_check.ipynb)
-to verify the pinned OpenMMLab environment, download and hash the explicit
+to optionally stream-extract the full official ZIP directly from Microsoft,
+verify the pinned OpenMMLab environment, download and hash the explicit
 RTMDet-M/RTMPose-L artifacts, extract a smoke sample, inspect its raw 133-point
 cache and validate resume behavior. It can also be opened directly in
 [Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/dev/notebooks/03_rtmpose_wholebody_colab_check.ipynb)
