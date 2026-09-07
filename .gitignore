@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Secrets
+.env
+
+# Local datasets and generated artifacts
+data/raw/**
+data/processed/**
+artifacts/runs/**
+artifacts/releases/**
+artifacts/pretrained/**
+
+# ASL Citizen generated metadata (rebuild from the official release).
+data/manifests/asl_citizen.*
+data/labels/asl_citizen_labels.json
+data/splits/asl_citizen_official.json
+
+# Notebook state
+.ipynb_checkpoints/

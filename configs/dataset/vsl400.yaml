@@ -1,0 +1,54 @@
+schema_version: 1
+
+dataset:
+  name: vsl400
+  adapter: vsl400
+  root: ${VSL400_ROOT}
+  video_extension: .mp4
+  gloss_file: gloss.csv
+
+  views:
+    front:
+      directory: front_view
+      metadata: front_view.json
+      directory_aliases: [cam_1]
+      metadata_aliases: [cam_1.json]
+    left:
+      directory: left_view
+      metadata: left_view.json
+      directory_aliases: [cam_2]
+      metadata_aliases: [cam_2.json]
+    right:
+      directory: right_view
+      metadata: right_view.json
+      directory_aliases: [cam_3]
+      metadata_aliases: [cam_3.json]
+
+expected:
+  clips: 74259
+  glosses: 400
+  signers: 28
+  views_per_instance: 3
+  fps: 25.0
+  width: 1080
+  height: 1080
+  enforce_counts: true
+  fps_tolerance: 0.05
+
+split:
+  strategy: signer_disjoint
+  ratios:
+    train: 0.80
+    validation: 0.10
+    test: 0.10
+  seed: 42
+  search_trials: 5000
+  official_file: data/splits/vsl400_official.json
+
+outputs:
+  manifest_csv: data/manifests/vsl400.csv
+  manifest_parquet: data/manifests/vsl400.parquet
+  labels: data/labels/vsl400_labels.json
+  split: data/splits/vsl400_signer_split.json
+  report: artifacts/runs/data-preparation/validation_report.json
+  invalid_records: artifacts/runs/data-preparation/invalid_records.csv

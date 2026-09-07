@@ -1,0 +1,40 @@
+schema_version: 1
+
+# Production offline extractor for ASL Citizen. MMPose is the framework;
+# RTMPose-L is the explicit top-down whole-body pose model. Do not replace
+# these paths with the mutable MMPose alias "wholebody".
+extractor:
+  name: rtmpose_l_coco_wholebody_384x288
+  framework: mmpose
+  variant: rtmpose-l
+  training_dataset: coco-wholebody
+  raw_layout: coco_wholebody_133
+  expected_num_keypoints: 133
+  # MMPose uses (width, height). The official config declares (288, 384).
+  input_size_wh: [288, 384]
+  device: cuda:0
+  person_category_id: 0
+  hash_source_video: true
+
+  pose_model:
+    config: ${MMPOSE_ROOT}/configs/wholebody_2d_keypoint/rtmpose/coco-wholebody/rtmpose-l_8xb32-270e_coco-wholebody-384x288.py
+    checkpoint: ${RTMPOSE_L_WHOLEBODY_CHECKPOINT}
+    checkpoint_url: https://download.openmmlab.com/mmpose/v1/projects/rtmposev1/rtmpose-l_simcc-coco-wholebody_pt-aic-coco_270e-384x288-eaeb96c8_20230125.pth
+    # Leave empty only for the first verification. `ss-extract-pose verify`
+    # prints the full digest; pin it here before the production extraction.
+    checkpoint_sha256: ""
+
+  detector:
+    config: ${MMPOSE_ROOT}/demo/mmdetection_cfg/rtmdet_m_640-8xb32_coco-person.py
+    checkpoint: ${RTMDET_M_PERSON_CHECKPOINT}
+    checkpoint_url: https://download.openmmlab.com/mmpose/v1/projects/rtmpose/rtmdet_m_8xb32-100e_coco-obj365-person-235e8209.pth
+    checkpoint_sha256: ""
+
+  person_selection:
+    bbox_threshold: 0.30
+    # Expanding the selected signer crop reduces hand truncation near its edge.
+    bbox_expansion: 1.20
+    detector_score_weight: 0.20
+    center_weight: 0.20
+    area_weight: 0.10
+    continuity_iou_weight: 0.50
