@@ -29,6 +29,7 @@ dev = [
 silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
+ss-select-asl-subset = "silent_signal.cli.select_subset:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]

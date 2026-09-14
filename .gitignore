@@ -21,6 +21,7 @@ Thumbs.db
 # Local datasets and generated artifacts
 data/raw/**
 data/processed/**
+data/subsets/**
 artifacts/runs/**
 artifacts/releases/**
 artifacts/pretrained/**

@@ -93,6 +93,17 @@ checks extraction space, imports the official CSVs, and stores preparation
 outputs and resumable validation progress in Drive. Push this implementation
 to the selected branch before running it. No Zenodo token is needed.
 
+To extract pose only for the 200 ASL Citizen classes with the highest ASL-LEX
+2.0 subjective conversational-frequency ratings, use
+[04_asl_citizen_top200_pose_extraction.ipynb](notebooks/04_asl_citizen_top200_pose_extraction.ipynb).
+It is standalone: on a fresh GPU runtime it can stream-extract ASL Citizen, build
+the official manifest, create the pinned OpenMMLab environment, download models,
+select the subset and extract pose without running notebooks `00` or `03`. It
+preserves the official splits and all clips in each selected class; it does not
+rank words by ASL Citizen video count. See the
+[top-200 selection contract](docs/asl_citizen_top200.md) for the exact rule,
+outputs, source, license, and limitations.
+
 The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
 files need roughly 89 GiB together, before extra working space or pose caches;
 check the actual Colab disk quota before downloading. See the notebook and
