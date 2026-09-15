@@ -35,6 +35,10 @@ def test_top200_notebook_is_clean_and_has_expected_sequence() -> None:
     assert "RUN_FULL_EXTRACTION = True" in source
     assert "--num-shards" in source
     assert "--continue-on-error" in source
+    assert "subprocess.Popen(" in source
+    assert "stdout=subprocess.PIPE" in source
+    assert "stderr=subprocess.STDOUT" in source
+    assert "print(line, end='', flush=True)" in source
 
 
 def test_top200_notebook_avoids_kernel_binary_data_imports() -> None:
