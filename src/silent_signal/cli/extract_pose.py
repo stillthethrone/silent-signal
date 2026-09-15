@@ -148,7 +148,13 @@ def main(
                 num_shards=args.num_shards,
                 shard_index=args.shard_index,
             )
+            print(
+                f"[setup] selected {len(records)} records; loading RTMDet and RTMPose...",
+                file=sys.stderr,
+                flush=True,
+            )
             extractor: WholeBodyExtractor = extractor_factory(config)
+            print("[setup] models ready; scanning resumable cache...", file=sys.stderr, flush=True)
             return _extract_records(
                 records,
                 dataset_root=dataset_root,
@@ -215,8 +221,11 @@ def _extract_records(
         "failed": 0,
         "failures": [],
     }
+    expected_cache_names = {
+        pose_cache_path(output_root, record.sample_id).name for record in records
+    }
     existing_cache_files = sum(
-        pose_cache_path(output_root, record.sample_id).is_file() for record in records
+        path.name in expected_cache_names for path in output_root.glob("*/*.npz")
     )
     print(
         f"[resume] found {existing_cache_files}/{len(records)} existing cache files; "
