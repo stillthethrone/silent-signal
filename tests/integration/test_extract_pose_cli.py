@@ -71,7 +71,10 @@ def _write_pose_config(path: Path) -> None:
     )
 
 
-def test_extract_cli_writes_cache_report_and_resumes_current_result(tmp_path: Path) -> None:
+def test_extract_cli_writes_cache_report_and_resumes_current_result(
+    tmp_path: Path,
+    capsys,
+) -> None:
     dataset_root = tmp_path / "ASL_Citizen"
     video = dataset_root / "videos" / "clip.mp4"
     video.parent.mkdir(parents=True)
@@ -121,6 +124,8 @@ def test_extract_cli_writes_cache_report_and_resumes_current_result(tmp_path: Pa
     cache = pose_cache_path(output_root, "clip")
     assert read_pose_cache(cache).sample_id == "clip"
     assert json.loads(report.read_text(encoding="utf-8"))["extracted"] == 1
+    first_stderr = capsys.readouterr().err
+    assert "[resume] found 0/1 existing cache files" in first_stderr
 
     assert main(arguments, extractor_factory=lambda _config: extractor) == 0
     assert extractor.calls == 1
@@ -128,6 +133,59 @@ def test_extract_cli_writes_cache_report_and_resumes_current_result(tmp_path: Pa
     assert resumed["resumed"] == 1
     assert resumed["extracted"] == 0
     assert resumed["selection"]["num_shards"] == 1
+
+
+def test_extract_cli_prints_live_resume_progress(tmp_path: Path, capsys) -> None:
+    dataset_root = tmp_path / "ASL_Citizen"
+    video = dataset_root / "videos" / "clip.mp4"
+    video.parent.mkdir(parents=True)
+    video.write_bytes(b"video")
+    manifest = tmp_path / "manifest.csv"
+    write_manifest(
+        (
+            ManifestRecord(
+                sample_id="clip",
+                instance_id="clip",
+                video_id="clip",
+                signer_id="signer",
+                gloss_id="hello",
+                gloss_name="hello",
+                class_index=0,
+                view="single",
+                video_path="videos/clip.mp4",
+                split="train",
+            ),
+        ),
+        manifest,
+    )
+    config = tmp_path / "rtmpose.yaml"
+    _write_pose_config(config)
+    output_root = tmp_path / "pose-cache"
+    report = tmp_path / "report.json"
+    extractor = _FakeExtractor()
+    arguments = [
+        "extract",
+        "--config",
+        str(config),
+        "--manifest",
+        str(manifest),
+        "--dataset-root",
+        str(dataset_root),
+        "--output-root",
+        str(output_root),
+        "--report",
+        str(report),
+        "--progress-every",
+        "1",
+    ]
+
+    assert main(arguments, extractor_factory=lambda _config: extractor) == 0
+    capsys.readouterr()
+    assert main(arguments, extractor_factory=lambda _config: extractor) == 0
+
+    stderr = capsys.readouterr().err
+    assert "[resume] found 1/1 existing cache files" in stderr
+    assert "[1/1] done=1/1 new=0 resumed=1 failed=0 action=resume" in stderr
 
 
 def test_record_shards_are_sorted_deterministic_and_disjoint() -> None:

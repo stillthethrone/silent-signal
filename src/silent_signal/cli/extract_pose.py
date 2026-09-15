@@ -215,6 +215,15 @@ def _extract_records(
         "failed": 0,
         "failures": [],
     }
+    existing_cache_files = sum(
+        pose_cache_path(output_root, record.sample_id).is_file() for record in records
+    )
+    print(
+        f"[resume] found {existing_cache_files}/{len(records)} existing cache files; "
+        "each file will be validated before it is skipped.",
+        file=sys.stderr,
+        flush=True,
+    )
     for position, record in enumerate(records, start=1):
         cache_path = pose_cache_path(output_root, record.sample_id)
         try:
@@ -232,7 +241,16 @@ def _extract_records(
                     video_sha256=video_sha256,
                 ):
                     summary["resumed"] += 1
-                    _progress(position, len(records), record.sample_id, "resume", progress_every)
+                    _progress(
+                        position,
+                        len(records),
+                        record.sample_id,
+                        "resume",
+                        progress_every,
+                        extracted=summary["extracted"],
+                        resumed=summary["resumed"],
+                        failed=summary["failed"],
+                    )
                     continue
                 raise PoseCacheError(
                     f"Stale or corrupt cache exists for {record.sample_id}; "
@@ -243,7 +261,16 @@ def _extract_records(
             _validate_sequence(sequence, record, extractor.fingerprint)
             write_pose_cache(cache_path, sequence, overwrite=overwrite)
             summary["extracted"] += 1
-            _progress(position, len(records), record.sample_id, "extract", progress_every)
+            _progress(
+                position,
+                len(records),
+                record.sample_id,
+                "extract",
+                progress_every,
+                extracted=summary["extracted"],
+                resumed=summary["resumed"],
+                failed=summary["failed"],
+            )
         except (OSError, PoseCacheError, PoseExtractionError, ValueError) as exc:
             summary["failed"] += 1
             summary["failures"].append(
@@ -253,7 +280,17 @@ def _extract_records(
                     "error": str(exc),
                 }
             )
-            print(f"failed {record.sample_id}: {exc}", file=sys.stderr)
+            print(f"failed {record.sample_id}: {exc}", file=sys.stderr, flush=True)
+            _progress(
+                position,
+                len(records),
+                record.sample_id,
+                "failed",
+                progress_every,
+                extracted=summary["extracted"],
+                resumed=summary["resumed"],
+                failed=summary["failed"],
+            )
             if not continue_on_error:
                 break
 
@@ -362,9 +399,19 @@ def _progress(
     sample_id: str,
     action: str,
     every: int,
+    *,
+    extracted: int,
+    resumed: int,
+    failed: int,
 ) -> None:
     if every and (position == 1 or position == total or position % every == 0):
-        print(f"[{position}/{total}] {action}: {sample_id}", file=sys.stderr)
+        print(
+            f"[{position}/{total}] done={position}/{total} "
+            f"new={extracted} resumed={resumed} failed={failed} "
+            f"action={action} sample={sample_id}",
+            file=sys.stderr,
+            flush=True,
+        )
 
 
 def _print_json(value: Any) -> None:
