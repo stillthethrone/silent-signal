@@ -32,7 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-id", default="OpenGVLab/VideoMAEv2-Base")
     parser.add_argument("--model-revision", default="0e826d7e85e39f9d951e331cd91c5c2d8142d385")
     parser.add_argument("--classes", type=int, default=30)
-    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
