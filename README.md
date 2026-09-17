@@ -4,8 +4,10 @@ Reproducible isolated sign-language recognition research with ASL Citizen
 (American Sign Language) and VSL400 (Vietnamese Sign Language). The implemented
 milestones prepare and validate data, import ASL Citizen's official splits,
 support VSL400 signer allocation, and provide reproducible offline whole-body
-pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. Model
-training remains unimplemented scaffolding.
+pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. The
+ASL Citizen top-200 path now includes graph preprocessing and a tested
+Graph-Spatial-Temporal Encoder smoke-training boundary; full epoch-level
+training and held-out evaluation remain future milestones.
 
 ## ASL Citizen preparation
 
@@ -111,6 +113,12 @@ without reading videos or using a GPU. The configuration pins the completed mani
 extractor fingerprints and preserves the official splits. See the
 [graph preprocessing contract](docs/graph_preprocessing.md) for the feature, mask,
 normalization, and cache definitions.
+
+After graph preparation passes, use
+[06_asl_citizen_top200_graph_encoder_check.ipynb](notebooks/06_asl_citizen_top200_graph_encoder_check.ipynb)
+to validate the mask-aware Graph-Spatial-Temporal Encoder, its 200-class head, backward pass,
+optimizer step and atomic smoke checkpoint. This check is not full multi-epoch training; see
+the [graph encoder contract](docs/graph_encoder.md).
 
 The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
 files need roughly 89 GiB together, before extra working space or pose caches;
