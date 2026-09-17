@@ -154,12 +154,14 @@ def test_remote_extract_uses_ranges_and_resumes_completed_files(
     archive = _archive(tmp_path / "dataset.zip")
     requests = _mock_remote_archive(monkeypatch, archive.read_bytes())
     destination = tmp_path / "data"
+    reports: list[str] = []
 
     extract_remote_archive(
         destination,
         url="https://example.com/dataset.zip",
         reserve_bytes=0,
         range_chunk_size=64,
+        report=reports.append,
     )
     target = destination / "videos/001.mp4"
     original = target.stat().st_mtime_ns
@@ -179,8 +181,12 @@ def test_remote_extract_uses_ranges_and_resumes_completed_files(
         url="https://example.com/dataset.zip",
         reserve_bytes=0,
         range_chunk_size=64,
+        report=reports.append,
     )
     assert target.stat().st_mtime_ns == original
+    assert any("Cache ready 0/" in message for message in reports)
+    assert any("cache 4/4" in message for message in reports)
+    assert any("Cache ready 4/4" in message for message in reports)
 
 
 def test_remote_extract_can_select_only_requested_files(

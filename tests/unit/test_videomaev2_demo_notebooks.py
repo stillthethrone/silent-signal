@@ -48,6 +48,9 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "CHECKPOINT_EVERY" in source
     assert "RESUME = True" in source
     assert "RUN_TEST = False" in source
+    assert "PERSIST_VIDEO_CACHE = True" in source
+    assert "datasets/asl_citizen_top30" in source
+    assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
 

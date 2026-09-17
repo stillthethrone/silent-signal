@@ -405,7 +405,12 @@ def _extract_members(
     pending.sort(key=lambda pair: pair[0].header_offset)
     required = sum(item.file_size for item, _ in pending)
     _require_space(dataset_root, required, reserve_bytes)
-    report(f"Extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)")
+    completed_before_run = len(members) - len(pending)
+    report(
+        f"Cache ready {completed_before_run:,}/{len(members):,}; "
+        f"extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)"
+    )
+    progress_step = max(1, min(1000, (len(pending) + 19) // 20))
     for index, (item, target) in enumerate(pending, start=1):
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary: Path | None = None
@@ -429,8 +434,11 @@ def _extract_members(
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
-        if index % 1000 == 0 or index == len(pending):
-            report(f"Extracted {index:,}/{len(pending):,}")
+        if index % progress_step == 0 or index == len(pending):
+            report(
+                f"Extracted {index:,}/{len(pending):,} this run; "
+                f"cache {completed_before_run + index:,}/{len(members):,}"
+            )
 
 
 def _record_remote_identity(dataset_root: Path, remote: dict[str, Any]) -> None:
