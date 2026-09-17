@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
@@ -181,6 +182,7 @@ def _prepare_records(
         "failures": [],
         "split_counts": dict(Counter(record.split for record in records)),
     }
+    started_at = time.perf_counter()
     expected_names = {pose_cache_path(output_root, record.sample_id).name for record in records}
     existing = sum(path.name in expected_names for path in output_root.glob("*/*.npz"))
     print(
@@ -211,6 +213,7 @@ def _prepare_records(
                     "resume",
                     summary,
                     progress_every,
+                    started_at,
                 )
                 continue
             raw = read_pose_cache(
@@ -228,18 +231,35 @@ def _prepare_records(
             summary["prepared"] += 1
             observed_ratios.append(float(sample.metadata["observed_joint_ratio"]))
             usable_ratios.append(float(sample.metadata["usable_joint_ratio"]))
-            _progress(position, len(records), record.sample_id, "prepare", summary, progress_every)
+            _progress(
+                position,
+                len(records),
+                record.sample_id,
+                "prepare",
+                summary,
+                progress_every,
+                started_at,
+            )
         except (OSError, PoseCacheError, ValueError) as exc:
             summary["failed"] += 1
             summary["failures"].append({"sample_id": record.sample_id, "error": str(exc)})
             print(f"failed {record.sample_id}: {exc}", file=sys.stderr, flush=True)
-            _progress(position, len(records), record.sample_id, "failed", summary, progress_every)
+            _progress(
+                position,
+                len(records),
+                record.sample_id,
+                "failed",
+                summary,
+                progress_every,
+                started_at,
+            )
             if not continue_on_error:
                 break
     summary["new_cache_statistics"] = {
         "mean_observed_joint_ratio": _mean(observed_ratios),
         "mean_usable_joint_ratio": _mean(usable_ratios),
     }
+    summary["duration_seconds"] = round(time.perf_counter() - started_at, 3)
     write_json_atomic(report_path, summary)
     print(
         json.dumps({key: value for key, value in summary.items() if key != "failures"}, indent=2),
@@ -255,11 +275,16 @@ def _progress(
     action: str,
     summary: Mapping[str, Any],
     every: int,
+    started_at: float,
 ) -> None:
     if every and (position == 1 or position == total or position % every == 0):
+        elapsed = time.perf_counter() - started_at
+        rate = position / elapsed if elapsed > 0 else 0.0
+        remaining = (total - position) / rate if rate > 0 else 0.0
         print(
             f"[{position}/{total}] new={summary['prepared']} resumed={summary['resumed']} "
-            f"failed={summary['failed']} action={action} sample={sample_id}",
+            f"failed={summary['failed']} action={action} sample={sample_id} "
+            f"elapsed={_duration(elapsed)} rate={rate:.2f}/s eta={_duration(remaining)}",
             file=sys.stderr,
             flush=True,
         )
@@ -267,6 +292,13 @@ def _progress(
 
 def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
+
+
+def _duration(seconds: float) -> str:
+    total = max(0, int(round(seconds)))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
 
 
 if __name__ == "__main__":
