@@ -16,7 +16,7 @@ import urllib.request
 import zipfile
 import zlib
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -318,6 +318,7 @@ def extract_remote_archive(
     url: str = ASL_CITIZEN_URL,
     reserve_bytes: int = _SPACE_MARGIN,
     range_chunk_size: int = _REMOTE_CHUNK_SIZE,
+    include_paths: Collection[str | Path] | None = None,
     report: Callable[[str], None] = print,
 ) -> Path:
     """Extract the official ZIP through HTTP Range without storing the ZIP locally.
@@ -326,6 +327,11 @@ def extract_remote_archive(
     are extracted in archive order so requests stay mostly sequential. Completed files
     are CRC-checked on a repeated call, and the remote identity is pinned under the
     dataset root to prevent mixing releases after an interrupted Colab session.
+
+    ``include_paths`` may contain paths relative to the dataset root (for example
+    ``videos/000001.mp4``). When provided, only those files are extracted. This is
+    useful for bounded research pilots without downloading or expanding the full
+    archive. Every requested path must exist in the pinned archive release.
     """
 
     dataset_root = Path(dataset_root).resolve()
@@ -342,6 +348,18 @@ def extract_remote_archive(
         if any(relative == Path(_REMOTE_STATE_NAME) for _, relative in members):
             raise ArchiveError(f"Archive uses reserved path: {_REMOTE_STATE_NAME}")
         report(f"Remote dataset root: {prefix or '(no outer directory)'}")
+        if include_paths is not None:
+            requested = {_normalize_member_request(path) for path in include_paths}
+            available = {relative.as_posix(): (item, relative) for item, relative in members}
+            missing = sorted(requested - available.keys())
+            if missing:
+                preview = ", ".join(missing[:5])
+                suffix = " ..." if len(missing) > 5 else ""
+                raise ArchiveError(
+                    f"Remote archive is missing {len(missing)} requested paths: {preview}{suffix}"
+                )
+            members = [available[path] for path in sorted(requested)]
+            report(f"Selected {len(members):,} requested files from the remote archive")
         _record_remote_identity(dataset_root, remote)
         _extract_members(
             archive,
@@ -352,6 +370,15 @@ def extract_remote_archive(
         )
     report(f"Dataset ready for metadata validation: {dataset_root}")
     return dataset_root
+
+
+def _normalize_member_request(value: str | Path) -> str:
+    text = str(value).replace("\\", "/").strip()
+    path = PurePosixPath(text)
+    unsafe_part = any(part in {"", ".", ".."} for part in path.parts)
+    if not text or path.is_absolute() or path.drive or unsafe_part:
+        raise ArchiveError(f"Unsafe requested archive path: {value}")
+    return path.as_posix()
 
 
 def _extract_members(

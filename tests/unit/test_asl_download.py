@@ -183,6 +183,53 @@ def test_remote_extract_uses_ranges_and_resumes_completed_files(
     assert target.stat().st_mtime_ns == original
 
 
+def test_remote_extract_can_select_only_requested_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _archive(tmp_path / "dataset.zip")
+    _mock_remote_archive(monkeypatch, archive.read_bytes())
+    destination = tmp_path / "data"
+
+    extract_remote_archive(
+        destination,
+        url="https://example.com/dataset.zip",
+        reserve_bytes=0,
+        range_chunk_size=64,
+        include_paths={"videos/001.mp4"},
+    )
+
+    assert (destination / "videos/001.mp4").read_bytes() == b"synthetic-video"
+    assert not (destination / "splits/train.csv").exists()
+
+
+def test_remote_extract_rejects_missing_or_unsafe_requested_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive = _archive(tmp_path / "dataset.zip")
+    payload = archive.read_bytes()
+    destination = tmp_path / "data"
+
+    _mock_remote_archive(monkeypatch, payload)
+    with pytest.raises(ArchiveError, match="missing 1 requested paths"):
+        extract_remote_archive(
+            destination,
+            url="https://example.com/dataset.zip",
+            reserve_bytes=0,
+            range_chunk_size=64,
+            include_paths={"videos/not-there.mp4"},
+        )
+
+    _mock_remote_archive(monkeypatch, payload)
+    with pytest.raises(ArchiveError, match="Unsafe requested archive path"):
+        extract_remote_archive(
+            destination,
+            url="https://example.com/dataset.zip",
+            reserve_bytes=0,
+            range_chunk_size=64,
+            include_paths={"../outside.mp4"},
+        )
+
+
 def test_remote_extract_rejects_changed_release_identity(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
