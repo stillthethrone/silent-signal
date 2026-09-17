@@ -83,6 +83,8 @@ def test_balanced_cap_represents_every_class_before_repeating() -> None:
 def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> None:
     source = _TRAINER.read_text(encoding="utf-8")
 
+    assert 'os.environ.setdefault("USE_TF", "0")' in source
+    assert 'os.environ.setdefault("USE_FLAX", "0")' in source
     assert "parameter.requires_grad = False" in source
     assert "visual.patch_embed(pixel_values)" in source
     assert "for block in visual.blocks" in source

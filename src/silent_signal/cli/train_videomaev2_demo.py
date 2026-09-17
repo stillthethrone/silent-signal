@@ -590,6 +590,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
 
+    # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
+    # Transformers probe those optional backends can import a JAX build that is
+    # incompatible with the runtime NumPy even though neither backend is used here.
+    os.environ.setdefault("USE_TF", "0")
+    os.environ.setdefault("USE_FLAX", "0")
+    os.environ.setdefault("USE_JAX", "0")
+    os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
+
     import cv2
     import matplotlib.pyplot as plt
     import numpy as np

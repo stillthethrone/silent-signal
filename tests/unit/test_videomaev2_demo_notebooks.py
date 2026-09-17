@@ -45,6 +45,10 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "RGB_LAYERS = 2" in source
     assert "RGB_HEADS = 8" in source
     assert "RGB Transformer" in source
+    assert "numpy==2.1.3" in source
+    assert "USE_TF'] = '0'" in source
+    assert "from transformers import PreTrainedModel" in source
+    assert "Import check PASS" in source
     assert "CHECKPOINT_EVERY" in source
     assert "RESUME = True" in source
     assert "RUN_TEST = False" in source
