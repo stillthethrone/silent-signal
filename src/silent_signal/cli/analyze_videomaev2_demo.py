@@ -1,4 +1,4 @@
-"""Analyze validation or test errors from the 30-class RGB Transformer demo."""
+"""Analyze validation or test errors from the 50-class RGB Transformer demo."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     from sklearn.metrics import classification_report, confusion_matrix
 
     baseline_root = args.baseline_root.resolve()
-    selection_path = baseline_root / "selected_30_words.json"
+    selection_path = baseline_root / "selected_50_words.json"
     baseline_report_path = baseline_root / "baseline_report.json"
     predictions_path = baseline_root / f"{args.split}_predictions.csv"
     for path in (selection_path, baseline_report_path, predictions_path):
@@ -48,11 +48,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
     baseline_report = json.loads(baseline_report_path.read_text(encoding="utf-8"))
     classes = list(selection["classes"])
-    if len(classes) != 30:
-        raise RuntimeError("Error analysis expects exactly 30 demo classes.")
+    if len(classes) != 50:
+        raise RuntimeError("Error analysis expects exactly 50 demo classes.")
     class_indices = [int(item["class_index"]) for item in classes]
-    if class_indices != list(range(30)):
-        raise RuntimeError("Demo class indices must be contiguous from 0 to 29.")
+    if class_indices != list(range(50)):
+        raise RuntimeError("Demo class indices must be contiguous from 0 to 49.")
     labels = [str(item["gloss_name"]) for item in classes]
     predictions = pd.read_csv(predictions_path)
     required = {
@@ -126,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for axis in axes:
         axis.set_xticklabels(labels, rotation=75, ha="right")
         axis.set_yticklabels(labels, rotation=0)
-    figure.suptitle("VideoMAE V2 + RGB Transformer demo (30 classes; not final benchmark)")
+    figure.suptitle("VideoMAE V2 + RGB Transformer demo (50 classes; not final benchmark)")
     figure.tight_layout()
     confusion_path = baseline_root / f"{args.split}_confusion_matrices.png"
     figure.savefig(confusion_path, dpi=160, bbox_inches="tight")
@@ -200,12 +200,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     axis = split_table.plot(kind="bar", figsize=(14, 6), width=0.85)
     axis.set(
         ylabel="Clips",
-        title="Official ASL Citizen split counts for the selected 30 words",
+        title="Official ASL Citizen split counts for the selected 50 words",
     )
     axis.grid(axis="y", alpha=0.3)
     plt.xticks(rotation=60, ha="right")
     plt.tight_layout()
-    split_plot_path = baseline_root / "selected_30_official_split_counts.png"
+    split_plot_path = baseline_root / "selected_50_official_split_counts.png"
     plt.savefig(split_plot_path, dpi=160, bbox_inches="tight")
     plt.close()
 
@@ -216,7 +216,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "created_utc": datetime.now(UTC).isoformat(),
         "state": "passed",
-        "study_stage": "complete-data 30-class RGB-only demo error analysis",
+        "study_stage": "complete-data 50-class RGB-only demo error analysis",
         "analysis_split": args.split,
         "warning": (
             "Use validation errors to design improvements. Do not tune from test results; "

@@ -32,7 +32,7 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     _assert_clean(notebook)
     assert "feat/asl-citizen-videomaev2-demo-baseline" in source
     assert "OpenGVLab/VideoMAEv2-Base" in source
-    assert "CLASS_COUNT = 30" in source
+    assert "CLASS_COUNT = 50" in source
     assert "MAX_EPOCHS = 50" in source
     assert "classes = eligible[:CLASS_COUNT]" in source
     assert "SignFrequency(M)" in source
@@ -55,7 +55,8 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "RUN_TEST = False" in source
     assert "PERSIST_VIDEO_CACHE = True" in source
     assert "datasets/asl_citizen_top30" in source
-    assert "videomaev2_rgb_transformer_demo30_e50" in source
+    assert "tái sử dụng cache top-30" in source
+    assert "videomaev2_rgb_transformer_demo50_e50" in source
     assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
@@ -65,11 +66,11 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     notebook, source = _source(_ANALYSIS_NOTEBOOK)
     _assert_clean(notebook)
     assert "ANALYSIS_SPLIT = 'validation'" in source
-    assert "videomaev2_rgb_transformer_demo30_e50" in source
+    assert "videomaev2_rgb_transformer_demo50_e50" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
     assert "silent_signal.cli.analyze_videomaev2_demo" in source
     assert "confusion_matrices.png" in source
     assert "per_class_metrics.png" in source
     assert "top_confusions.png" in source
     assert "confidence_histogram.png" in source
-    assert "selected_30_official_split_counts.png" in source
+    assert "selected_50_official_split_counts.png" in source

@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--model-id", default="OpenGVLab/VideoMAEv2-Base")
     parser.add_argument("--model-revision", default="0e826d7e85e39f9d951e331cd91c5c2d8142d385")
-    parser.add_argument("--classes", type=int, default=30)
+    parser.add_argument("--classes", type=int, default=50)
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
@@ -558,7 +558,9 @@ def _write_predictions(
     temporary.replace(path)
 
 
-def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path) -> None:
+def _plot_history(
+    plt: Any, history: list[dict[str, Any]], path: Path, class_count: int
+) -> None:
     if not history:
         return
     epochs = [item["epoch"] for item in history]
@@ -577,7 +579,9 @@ def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path) -> None:
     axes[1].set(title="Top-1 accuracy", xlabel="Epoch", ylabel="Accuracy", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
-    figure.suptitle("Frozen VideoMAE V2 + trainable RGB Transformer — 30-class demo")
+    figure.suptitle(
+        f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo"
+    )
     figure.tight_layout()
     figure.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -585,8 +589,8 @@ def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.classes != 30:
-        raise RuntimeError("This research demo is intentionally fixed to 30 classes.")
+    if args.classes != 50:
+        raise RuntimeError("This research demo is intentionally fixed to 50 classes.")
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
 
@@ -670,9 +674,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     selection_payload = {
         "schema_version": 1,
-        "warning": "DEMO 30 classes; do not compare these metrics with the final 200-class study.",
+        "warning": "DEMO 50 classes; do not compare these metrics with the final 200-class study.",
         "selection": (
-            "highest-ranked 30 ASL-LEX classes from the frozen top-200 report "
+            "highest-ranked 50 ASL-LEX classes from the frozen top-200 report "
             "that contain clips in every official split"
         ),
         "split_policy": "official ASL Citizen train/validation/test; never re-split",
@@ -685,8 +689,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         },
         "classes": selected_words,
     }
-    _write_json_atomic(output_root / "selected_30_words.json", selection_payload)
-    print("\n30 TỪ DEMO (xếp theo ASL-LEX SignFrequency):", flush=True)
+    _write_json_atomic(output_root / "selected_50_words.json", selection_payload)
+    print("\n50 TỪ DEMO (xếp theo ASL-LEX SignFrequency):", flush=True)
     for item in selected_words:
         counts = item["counts"]
         percentages = item["percentages"]
@@ -888,7 +892,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         _write_json_atomic(output_root / "history.json", {"history": history})
-        _plot_history(plt, history, output_root / "training_curves.png")
+        _plot_history(plt, history, output_root / "training_curves.png", args.classes)
         print(
             f"[epoch {epoch + 1}] train top1={record['train_top1']:.3f}; "
             f"validation top1={record['validation_top1']:.3f}; best={improved}",
@@ -944,7 +948,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
-        "study_stage": "complete-data 30-class RGB-only demo; not the final 200-class benchmark",
+        "study_stage": "complete-data 50-class RGB-only demo; not the final 200-class benchmark",
         "split_policy": "official ASL Citizen train/validation/test; test excluded from tuning",
         "model": metadata,
         "device": str(device),
@@ -960,7 +964,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "artifacts": {
             "best_checkpoint": str(best_checkpoint),
             "last_checkpoint": str(last_checkpoint),
-            "selected_words": str(output_root / "selected_30_words.json"),
+            "selected_words": str(output_root / "selected_50_words.json"),
             "manifests": {
                 "all": str(demo_manifest),
                 **{split: str(path) for split, path in split_manifest_paths.items()},
