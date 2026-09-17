@@ -16,7 +16,7 @@ import urllib.request
 import zipfile
 import zlib
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -318,6 +318,7 @@ def extract_remote_archive(
     url: str = ASL_CITIZEN_URL,
     reserve_bytes: int = _SPACE_MARGIN,
     range_chunk_size: int = _REMOTE_CHUNK_SIZE,
+    include_paths: Collection[str | Path] | None = None,
     report: Callable[[str], None] = print,
 ) -> Path:
     """Extract the official ZIP through HTTP Range without storing the ZIP locally.
@@ -326,6 +327,11 @@ def extract_remote_archive(
     are extracted in archive order so requests stay mostly sequential. Completed files
     are CRC-checked on a repeated call, and the remote identity is pinned under the
     dataset root to prevent mixing releases after an interrupted Colab session.
+
+    ``include_paths`` may contain paths relative to the dataset root (for example
+    ``videos/000001.mp4``). When provided, only those files are extracted. This is
+    useful for bounded research pilots without downloading or expanding the full
+    archive. Every requested path must exist in the pinned archive release.
     """
 
     dataset_root = Path(dataset_root).resolve()
@@ -342,6 +348,18 @@ def extract_remote_archive(
         if any(relative == Path(_REMOTE_STATE_NAME) for _, relative in members):
             raise ArchiveError(f"Archive uses reserved path: {_REMOTE_STATE_NAME}")
         report(f"Remote dataset root: {prefix or '(no outer directory)'}")
+        if include_paths is not None:
+            requested = {_normalize_member_request(path) for path in include_paths}
+            available = {relative.as_posix(): (item, relative) for item, relative in members}
+            missing = sorted(requested - available.keys())
+            if missing:
+                preview = ", ".join(missing[:5])
+                suffix = " ..." if len(missing) > 5 else ""
+                raise ArchiveError(
+                    f"Remote archive is missing {len(missing)} requested paths: {preview}{suffix}"
+                )
+            members = [available[path] for path in sorted(requested)]
+            report(f"Selected {len(members):,} requested files from the remote archive")
         _record_remote_identity(dataset_root, remote)
         _extract_members(
             archive,
@@ -352,6 +370,15 @@ def extract_remote_archive(
         )
     report(f"Dataset ready for metadata validation: {dataset_root}")
     return dataset_root
+
+
+def _normalize_member_request(value: str | Path) -> str:
+    text = str(value).replace("\\", "/").strip()
+    path = PurePosixPath(text)
+    unsafe_part = any(part in {"", ".", ".."} for part in path.parts)
+    if not text or path.is_absolute() or path.drive or unsafe_part:
+        raise ArchiveError(f"Unsafe requested archive path: {value}")
+    return path.as_posix()
 
 
 def _extract_members(
@@ -378,7 +405,12 @@ def _extract_members(
     pending.sort(key=lambda pair: pair[0].header_offset)
     required = sum(item.file_size for item, _ in pending)
     _require_space(dataset_root, required, reserve_bytes)
-    report(f"Extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)")
+    completed_before_run = len(members) - len(pending)
+    report(
+        f"Cache ready {completed_before_run:,}/{len(members):,}; "
+        f"extract {len(pending):,} remaining files ({required / 1024**3:.2f} GiB)"
+    )
+    progress_step = max(1, min(1000, (len(pending) + 19) // 20))
     for index, (item, target) in enumerate(pending, start=1):
         target.parent.mkdir(parents=True, exist_ok=True)
         temporary: Path | None = None
@@ -402,8 +434,11 @@ def _extract_members(
         finally:
             if temporary is not None and temporary.exists():
                 temporary.unlink()
-        if index % 1000 == 0 or index == len(pending):
-            report(f"Extracted {index:,}/{len(pending):,}")
+        if index % progress_step == 0 or index == len(pending):
+            report(
+                f"Extracted {index:,}/{len(pending):,} this run; "
+                f"cache {completed_before_run + index:,}/{len(members):,}"
+            )
 
 
 def _record_remote_identity(dataset_root: Path, remote: dict[str, Any]) -> None:
