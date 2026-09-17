@@ -1,0 +1,24 @@
+schema_version: 1
+
+model:
+  input_dim: 7
+  num_nodes: 75
+  max_frames: 64
+  hidden_dim: 128
+  embedding_dim: 256
+  num_blocks: 4
+  temporal_kernel: 5
+  dropout: 0.10
+  num_classes: 200
+
+smoke:
+  batch_size: 8
+  train_steps: 5
+  sample_limit: 64
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  seed: 42
+
+expected:
+  manifest_sha256: 7e3dc11bc6fb25ff6b4311c9fe4f2175841ce6ad5eab89da4e5c8af0de596dfe
+  preprocessing_fingerprint: 9a4f48c1dbc9b7a7448978637d37879b12257d99cbc34063c4f52ee49c8b4e8b

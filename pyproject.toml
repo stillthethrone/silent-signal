@@ -24,6 +24,9 @@ dev = [
   "ruff>=0.9",
   "types-PyYAML>=6.0.12",
 ]
+training = [
+  "torch>=2.4,<3",
+]
 
 [project.scripts]
 silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
@@ -31,6 +34,7 @@ ss-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
 ss-select-asl-subset = "silent_signal.cli.select_subset:entrypoint"
 ss-prepare-pose-graph = "silent_signal.cli.prepare_graph:entrypoint"
+ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]
