@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 
 _ROOT = Path(__file__).parents[2]
-_TRAIN_NOTEBOOK = _ROOT / "notebooks/07_asl_citizen_top20_videomaev2_rgb_baseline.ipynb"
-_ANALYSIS_NOTEBOOK = _ROOT / "notebooks/08_asl_citizen_top20_videomaev2_error_analysis.ipynb"
+_TRAIN_NOTEBOOK = _ROOT / "notebooks/07_asl_citizen_top30_videomaev2_rgb_transformer_baseline.ipynb"
+_ANALYSIS_NOTEBOOK = _ROOT / "notebooks/08_asl_citizen_top30_videomaev2_error_analysis.ipynb"
 
 
 def _source(path: Path) -> tuple[dict[str, object], str]:
@@ -32,14 +32,19 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     _assert_clean(notebook)
     assert "feat/asl-citizen-videomaev2-demo-baseline" in source
     assert "OpenGVLab/VideoMAEv2-Base" in source
-    assert "CLASS_COUNT = 20" in source
-    assert "selection['classes'][:CLASS_COUNT]" in source
+    assert "CLASS_COUNT = 30" in source
+    assert "classes = eligible[:CLASS_COUNT]" in source
     assert "SignFrequency(M)" in source
     assert "train', 'validation', 'test" in source
     assert "Split isolation: PASS" in source
     assert "train_test_split" not in source
     assert "MAX_TRAIN_BATCHES" in source
     assert "MAX_EVAL_BATCHES" in source
+    assert "MAX_TRAIN_BATCHES = 0" in source
+    assert "MAX_EVAL_BATCHES = 0" in source
+    assert "RGB_LAYERS = 2" in source
+    assert "RGB_HEADS = 8" in source
+    assert "RGB Transformer" in source
     assert "CHECKPOINT_EVERY" in source
     assert "RESUME = True" in source
     assert "RUN_TEST = False" in source
@@ -57,4 +62,4 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "per_class_metrics.png" in source
     assert "top_confusions.png" in source
     assert "confidence_histogram.png" in source
-    assert "selected_20_official_split_counts.png" in source
+    assert "selected_30_official_split_counts.png" in source

@@ -1,4 +1,4 @@
-"""Train a bounded RGB-only VideoMAE V2 baseline on an official ASL split.
+"""Train a full-data RGB Transformer baseline on official ASL splits.
 
 Heavy video and training dependencies are imported only inside ``main`` so the
 core package remains usable without the optional Colab stack.
@@ -31,19 +31,32 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--model-id", default="OpenGVLab/VideoMAEv2-Base")
     parser.add_argument("--model-revision", default="0e826d7e85e39f9d951e331cd91c5c2d8142d385")
-    parser.add_argument("--classes", type=int, default=20)
+    parser.add_argument("--classes", type=int, default=30)
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
-    parser.add_argument("--max-train-batches", type=int, default=60)
-    parser.add_argument("--max-eval-batches", type=int, default=40)
+    parser.add_argument(
+        "--max-train-batches",
+        type=int,
+        default=0,
+        help="Zero uses every official training clip.",
+    )
+    parser.add_argument(
+        "--max-eval-batches",
+        type=int,
+        default=0,
+        help="Zero uses every official validation/test clip.",
+    )
+    parser.add_argument("--rgb-embedding-dim", type=int, default=256)
+    parser.add_argument("--rgb-layers", type=int, default=2)
+    parser.add_argument("--rgb-heads", type=int, default=8)
+    parser.add_argument("--rgb-dropout", type=float, default=0.1)
     parser.add_argument("--checkpoint-every", type=int, default=20)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
-    parser.add_argument("--freeze-backbone", action="store_true")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--run-test", action="store_true")
     return parser
@@ -87,21 +100,42 @@ def _select_demo_rows(
     rows: list[dict[str, str]], selection_path: Path, class_count: int
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    ranked = list(selection.get("classes", ()))[:class_count]
+    source_ranked = list(selection.get("classes", ()))
+    source_counts: dict[tuple[int, str], int] = defaultdict(int)
+    for row in rows:
+        source_counts[(int(row["class_index"]), str(row["split"]))] += 1
+    required_splits = ("train", "validation", "test")
+    eligible = [
+        item
+        for item in source_ranked
+        if all(
+            source_counts[(int(item["subset_class_index"]), split)] > 0 for split in required_splits
+        )
+    ]
+    ranked = []
+    for demo_class_index, item in enumerate(eligible[:class_count]):
+        ranked.append(
+            {
+                **item,
+                "source_subset_class_index": int(item["subset_class_index"]),
+                "demo_class_index": demo_class_index,
+            }
+        )
     if len(ranked) != class_count:
-        raise RuntimeError(f"Selection report has fewer than {class_count} ranked classes.")
-    if [item["rank"] for item in ranked] != list(range(1, class_count + 1)):
-        raise RuntimeError("The demo must use the first contiguous ASL-LEX ranks.")
-    if [item["subset_class_index"] for item in ranked] != list(range(class_count)):
-        raise RuntimeError("Top-ranked class indices are not contiguous from zero.")
-
-    selected_indices = {int(item["subset_class_index"]) for item in ranked}
+        raise RuntimeError(
+            f"Only {len(ranked)} ranked classes contain clips in every official split; "
+            f"{class_count} are required."
+        )
+    source_to_demo = {
+        int(item["source_subset_class_index"]): int(item["demo_class_index"]) for item in ranked
+    }
     selected: list[dict[str, Any]] = []
     for row in rows:
-        class_index = int(row["class_index"])
-        if class_index in selected_indices:
+        source_class_index = int(row["class_index"])
+        if source_class_index in source_to_demo:
             item: dict[str, Any] = dict(row)
-            item["class_index"] = class_index
+            item["source_class_index"] = source_class_index
+            item["class_index"] = source_to_demo[source_class_index]
             selected.append(item)
 
     splits = {"train", "validation", "test"}
@@ -126,11 +160,11 @@ def _select_demo_rows(
     for row in selected:
         counts[(int(row["class_index"]), str(row["split"]))] += 1
     for class_item in ranked:
-        class_index = int(class_item["subset_class_index"])
+        class_index = int(class_item["demo_class_index"])
         for split in splits:
             if counts[(class_index, split)] == 0:
                 raise RuntimeError(
-                    f"Top-20 word {class_item['gloss_name']!r} has no official {split} clips."
+                    f"Selected word {class_item['gloss_name']!r} has no official {split} clips."
                 )
     return selected, ranked
 
@@ -145,10 +179,13 @@ def _write_demo_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
     temporary.replace(path)
 
 
-def _balanced_cap(rows: list[dict[str, Any]], maximum: int, seed: int) -> list[dict[str, Any]]:
+def _balanced_cap(
+    rows: list[dict[str, Any]], maximum: int, seed: int, *, shuffle: bool = True
+) -> list[dict[str, Any]]:
     if maximum <= 0 or maximum >= len(rows):
         result = list(rows)
-        random.Random(seed).shuffle(result)
+        if shuffle:
+            random.Random(seed).shuffle(result)
         return result
     groups: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -167,7 +204,8 @@ def _balanced_cap(rows: list[dict[str, Any]], maximum: int, seed: int) -> list[d
             if group:
                 next_active.append(class_index)
         active = next_active
-    rng.shuffle(result)
+    if shuffle:
+        rng.shuffle(result)
     return result
 
 
@@ -268,6 +306,114 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
     return VideoDataset
 
 
+def _make_rgb_temporal_model_class(torch: Any):
+    class FrozenVideoMAEWithRGBTransformer(torch.nn.Module):
+        """Frozen VideoMAE V2 tube tokens followed by a trainable temporal encoder."""
+
+        def __init__(
+            self,
+            backbone: Any,
+            *,
+            class_count: int,
+            embedding_dim: int,
+            layers: int,
+            heads: int,
+            dropout: float,
+        ) -> None:
+            super().__init__()
+            if embedding_dim % heads:
+                raise ValueError("rgb-embedding-dim must be divisible by rgb-heads.")
+            self.backbone = backbone
+            for parameter in self.backbone.parameters():
+                parameter.requires_grad = False
+            visual = self.backbone.model
+            source_dim = int(visual.embed_dim)
+            temporal_tokens = int(visual.patch_embed.num_patches) // (
+                int(visual.patch_embed.img_size[0] // visual.patch_embed.patch_size[0])
+                * int(visual.patch_embed.img_size[1] // visual.patch_embed.patch_size[1])
+            )
+            self.temporal_tokens = temporal_tokens
+            self.projection = torch.nn.Linear(source_dim, embedding_dim)
+            self.temporal_position = torch.nn.Parameter(
+                torch.zeros(1, temporal_tokens, embedding_dim)
+            )
+            encoder_layer = torch.nn.TransformerEncoderLayer(
+                d_model=embedding_dim,
+                nhead=heads,
+                dim_feedforward=embedding_dim * 4,
+                dropout=dropout,
+                activation="gelu",
+                batch_first=True,
+                norm_first=True,
+            )
+            self.rgb_transformer = torch.nn.TransformerEncoder(
+                encoder_layer, num_layers=layers, enable_nested_tensor=False
+            )
+            self.output_norm = torch.nn.LayerNorm(embedding_dim)
+            self.classifier = torch.nn.Linear(embedding_dim, class_count)
+            torch.nn.init.trunc_normal_(self.temporal_position, std=0.02)
+
+        def train(self, mode: bool = True):
+            super().train(mode)
+            self.backbone.eval()
+            return self
+
+        def _frozen_temporal_tokens(self, pixel_values: Any):
+            visual = self.backbone.model
+            with torch.no_grad():
+                tokens = visual.patch_embed(pixel_values)
+                if visual.pos_embed is not None:
+                    position = visual.pos_embed.expand(tokens.size(0), -1, -1)
+                    tokens = tokens + position.type_as(tokens).to(tokens.device).detach()
+                tokens = visual.pos_drop(tokens)
+                for block in visual.blocks:
+                    tokens = block(tokens)
+                temporal = pixel_values.shape[2] // int(visual.tubelet_size)
+                if tokens.shape[1] % temporal:
+                    raise RuntimeError("VideoMAE token count is not divisible by temporal tubes.")
+                spatial = tokens.shape[1] // temporal
+                tokens = tokens.reshape(tokens.shape[0], temporal, spatial, tokens.shape[2])
+                tokens = tokens.mean(dim=2)
+                if visual.fc_norm is not None:
+                    tokens = visual.fc_norm(tokens)
+                else:
+                    tokens = visual.norm(tokens)
+            return tokens
+
+        def forward(self, pixel_values: Any):
+            tokens = self._frozen_temporal_tokens(pixel_values)
+            tokens = self.projection(tokens)
+            if tokens.shape[1] != self.temporal_tokens:
+                raise RuntimeError(
+                    f"Expected {self.temporal_tokens} temporal tokens, got {tokens.shape[1]}."
+                )
+            tokens = tokens + self.temporal_position
+            tokens = self.rgb_transformer(tokens)
+            feature = self.output_norm(tokens).mean(dim=1)
+            return self.classifier(feature)
+
+        def trainable_state_dict(self) -> dict[str, Any]:
+            return {
+                name: value
+                for name, value in self.state_dict().items()
+                if not name.startswith("backbone.")
+            }
+
+        def load_trainable_state_dict(self, state: dict[str, Any]) -> None:
+            incompatible = self.load_state_dict(state, strict=False)
+            unexpected = list(incompatible.unexpected_keys)
+            non_backbone_missing = [
+                name for name in incompatible.missing_keys if not name.startswith("backbone.")
+            ]
+            if unexpected or non_backbone_missing:
+                raise RuntimeError(
+                    "Invalid RGB Transformer checkpoint: "
+                    f"unexpected={unexpected}, missing={non_backbone_missing}"
+                )
+
+    return FrozenVideoMAEWithRGBTransformer
+
+
 def _loader(torch: Any, dataset: Any, batch_size: int, workers: int):
     return torch.utils.data.DataLoader(
         dataset,
@@ -290,7 +436,7 @@ def _checkpoint_payload(
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     return {
-        "model_state": model.state_dict(),
+        "model_state": model.trainable_state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "epoch": epoch,
         "next_batch": next_batch,
@@ -431,7 +577,7 @@ def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path) -> None:
     axes[1].set(title="Top-1 accuracy", xlabel="Epoch", ylabel="Accuracy", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
-    figure.suptitle("VideoMAE V2 RGB-only demo — not a final benchmark")
+    figure.suptitle("Frozen VideoMAE V2 + trainable RGB Transformer — 30-class demo")
     figure.tight_layout()
     figure.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -439,8 +585,8 @@ def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.classes != 20:
-        raise RuntimeError("This bounded research notebook is intentionally fixed to 20 classes.")
+    if args.classes != 30:
+        raise RuntimeError("This research demo is intentionally fixed to 30 classes.")
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
 
@@ -482,14 +628,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{len(missing_videos)} selected videos are missing; first: {missing_videos[0]}"
         )
 
-    demo_manifest = output_root / "demo20_manifest.csv"
+    manifest_root = output_root / "manifests"
+    demo_manifest = manifest_root / "all.csv"
     _write_demo_manifest(demo_manifest, selected_rows)
+    split_manifest_paths = {}
+    for split, rows in split_rows.items():
+        split_path = manifest_root / f"{split}.csv"
+        _write_demo_manifest(split_path, rows)
+        split_manifest_paths[split] = split_path
     manifest_sha = _sha256(demo_manifest)
     selection_sha = _sha256(args.selection_report.resolve())
-    gloss_by_class = {int(item["subset_class_index"]): str(item["gloss_name"]) for item in ranked}
+    gloss_by_class = {int(item["demo_class_index"]): str(item["gloss_name"]) for item in ranked}
     selected_words = []
     for item in ranked:
-        class_index = int(item["subset_class_index"])
+        class_index = int(item["demo_class_index"])
         counts = {
             split: sum(int(row["class_index"]) == class_index for row in split_rows[split])
             for split in split_rows
@@ -499,6 +651,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             {
                 "rank": int(item["rank"]),
                 "class_index": class_index,
+                "source_subset_class_index": int(item["source_subset_class_index"]),
                 "gloss_name": item["gloss_name"],
                 "sign_frequency_mean": item["sign_frequency_mean"],
                 "counts": counts,
@@ -509,16 +662,23 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     selection_payload = {
         "schema_version": 1,
-        "warning": "DEMO 20 classes; do not compare these metrics with the final 200-class study.",
-        "selection": "first 20 ASL-LEX frequency ranks from the frozen top-200 report",
+        "warning": "DEMO 30 classes; do not compare these metrics with the final 200-class study.",
+        "selection": (
+            "highest-ranked 30 ASL-LEX classes from the frozen top-200 report "
+            "that contain clips in every official split"
+        ),
         "split_policy": "official ASL Citizen train/validation/test; never re-split",
         "manifest_sha256": manifest_sha,
         "source_selection_sha256": selection_sha,
         "clips": {split: len(rows) for split, rows in split_rows.items()},
+        "manifests": {
+            "all": str(demo_manifest),
+            **{split: str(path) for split, path in split_manifest_paths.items()},
+        },
         "classes": selected_words,
     }
-    _write_json_atomic(output_root / "selected_20_words.json", selection_payload)
-    print("\n20 TỪ DEMO (xếp theo ASL-LEX SignFrequency):", flush=True)
+    _write_json_atomic(output_root / "selected_30_words.json", selection_payload)
+    print("\n30 TỪ DEMO (xếp theo ASL-LEX SignFrequency):", flush=True)
     for item in selected_words:
         counts = item["counts"]
         percentages = item["percentages"]
@@ -530,23 +690,29 @@ def main(argv: Sequence[str] | None = None) -> int:
             flush=True,
         )
     print("Split isolation: PASS — no sample_id overlap.\n", flush=True)
+    print("Manifest tách riêng trên Drive:", flush=True)
+    for split, path in split_manifest_paths.items():
+        print(f"- {split}: {path} ({len(split_rows[split])} clips)", flush=True)
 
     print(f"Loading {args.model_id}@{args.model_revision} ...", flush=True)
     config = AutoConfig.from_pretrained(
         args.model_id, revision=args.model_revision, trust_remote_code=True
     )
-    model = AutoModel.from_pretrained(
+    backbone = AutoModel.from_pretrained(
         args.model_id,
         revision=args.model_revision,
         config=config,
         trust_remote_code=True,
     )
-    model.model.reset_classifier(args.classes)
-    if args.freeze_backbone:
-        for parameter in model.parameters():
-            parameter.requires_grad = False
-        for parameter in model.model.head.parameters():
-            parameter.requires_grad = True
+    RGBTemporalModel = _make_rgb_temporal_model_class(torch)
+    model = RGBTemporalModel(
+        backbone,
+        class_count=args.classes,
+        embedding_dim=args.rgb_embedding_dim,
+        layers=args.rgb_layers,
+        heads=args.rgb_heads,
+        dropout=args.rgb_dropout,
+    )
     model.to(device)
     trainable = sum(
         parameter.numel() for parameter in model.parameters() if parameter.requires_grad
@@ -554,7 +720,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     total_parameters = sum(parameter.numel() for parameter in model.parameters())
     print(
         f"Device={device}; parameters={total_parameters:,}; trainable={trainable:,}; "
-        f"freeze_backbone={args.freeze_backbone}",
+        f"VideoMAE_frozen=True; RGB_Transformer={args.rgb_layers} layers",
         flush=True,
     )
 
@@ -574,7 +740,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         "class_count": args.classes,
         "manifest_sha256": manifest_sha,
         "selection_sha256": selection_sha,
-        "freeze_backbone": args.freeze_backbone,
+        "architecture": "frozen VideoMAE V2 -> spatial pooling -> RGB Transformer -> classifier",
+        "videomae_frozen": True,
+        "rgb_embedding_dim": args.rgb_embedding_dim,
+        "rgb_layers": args.rgb_layers,
+        "rgb_heads": args.rgb_heads,
+        "rgb_dropout": args.rgb_dropout,
         "seed": args.seed,
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
@@ -590,7 +761,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         checkpoint = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
         if checkpoint.get("metadata") != metadata:
             raise RuntimeError("Existing checkpoint metadata differs from this run configuration.")
-        model.load_state_dict(checkpoint["model_state"])
+        model.load_trainable_state_dict(checkpoint["model_state"])
         optimizer.load_state_dict(checkpoint["optimizer_state"])
         start_epoch = int(checkpoint["epoch"])
         start_batch = int(checkpoint.get("next_batch", 0))
@@ -645,7 +816,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             checkpoint_callback=save_progress,
         )
         validation_rows = _balanced_cap(
-            split_rows["validation"], args.max_eval_batches * args.batch_size, args.seed
+            split_rows["validation"],
+            args.max_eval_batches * args.batch_size,
+            args.seed,
+            shuffle=False,
         )
         validation_loader = _loader(
             torch,
@@ -717,14 +891,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not best_checkpoint.is_file():
         raise RuntimeError("No best checkpoint was created.")
     best = torch.load(best_checkpoint, map_location="cpu", weights_only=False)
-    model.load_state_dict(best["model_state"])
+    model.load_trainable_state_dict(best["model_state"])
     model.to(device)
 
     evaluation: dict[str, Any] = {}
     requested_splits = ["validation"] + (["test"] if args.run_test else [])
     for split in requested_splits:
         evaluation_rows = _balanced_cap(
-            split_rows[split], args.max_eval_batches * args.batch_size, args.seed
+            split_rows[split],
+            args.max_eval_batches * args.batch_size,
+            args.seed,
+            shuffle=False,
         )
         evaluation_loader = _loader(
             torch,
@@ -759,7 +936,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
-        "study_stage": "bounded 20-class RGB-only demo; not the final 200-class benchmark",
+        "study_stage": "complete-data 30-class RGB-only demo; not the final 200-class benchmark",
         "split_policy": "official ASL Citizen train/validation/test; test excluded from tuning",
         "model": metadata,
         "device": str(device),
@@ -775,7 +952,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "artifacts": {
             "best_checkpoint": str(best_checkpoint),
             "last_checkpoint": str(last_checkpoint),
-            "selected_words": str(output_root / "selected_20_words.json"),
+            "selected_words": str(output_root / "selected_30_words.json"),
+            "manifests": {
+                "all": str(demo_manifest),
+                **{split: str(path) for split, path in split_manifest_paths.items()},
+            },
             "training_curves": str(output_root / "training_curves.png"),
         },
     }
