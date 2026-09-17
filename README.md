@@ -104,6 +104,14 @@ rank words by ASL Citizen video count. See the
 [top-200 selection contract](docs/asl_citizen_top200.md) for the exact rule,
 outputs, source, license, and limitations.
 
+After all 6,146 raw pose caches pass extraction, run
+[05_asl_citizen_top200_graph_preparation.ipynb](notebooks/05_asl_citizen_top200_graph_preparation.ipynb).
+It converts raw 133-keypoint sequences into resumable `[64, 75, 7]` graph tensors on Drive
+without reading videos or using a GPU. The configuration pins the completed manifest and
+extractor fingerprints and preserves the official splits. See the
+[graph preprocessing contract](docs/graph_preprocessing.md) for the feature, mask,
+normalization, and cache definitions.
+
 The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
 files need roughly 89 GiB together, before extra working space or pose caches;
 check the actual Colab disk quota before downloading. See the notebook and
