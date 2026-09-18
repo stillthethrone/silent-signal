@@ -35,6 +35,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     import numpy as np
     import pandas as pd
     import seaborn as sns
+    from matplotlib.ticker import PercentFormatter
     from sklearn.metrics import classification_report, confusion_matrix
 
     baseline_root = args.baseline_root.resolve()
@@ -146,6 +147,43 @@ def main(argv: Sequence[str] | None = None) -> int:
     figure.tight_layout()
     per_class_plot = baseline_root / f"{args.split}_per_class_metrics.png"
     figure.savefig(per_class_plot, dpi=160, bbox_inches="tight")
+    plt.close(figure)
+
+    macro_f1 = float(metrics["macro avg"]["f1-score"])
+    f1_ordered = per_class.sort_values(["f1", "gloss"], ascending=[False, True]).reset_index(
+        drop=True
+    )
+    f1_colors = [
+        "#2ca02c" if score >= macro_f1 else "#ffb000" if score >= 0.4 else "#d62728"
+        for score in f1_ordered["f1"]
+    ]
+    f1_labels = [
+        f"{int(row.class_index):02d}: {row.gloss} (n={int(row.support)})"
+        for row in f1_ordered.itertuples(index=False)
+    ]
+    figure, axis = plt.subplots(figsize=(11, 16))
+    positions = np.arange(len(f1_ordered))
+    axis.barh(positions, f1_ordered["f1"], color=f1_colors)
+    axis.axvline(
+        macro_f1,
+        color="#1f4fbf",
+        linestyle="--",
+        linewidth=1.8,
+        label=f"{args.split.title()} Macro-F1 = {macro_f1:.2%}",
+    )
+    axis.set_yticks(positions, f1_labels)
+    axis.invert_yaxis()
+    axis.set(
+        xlim=(0, 1),
+        xlabel="F1-score",
+        title=f"Per-class F1 scores on {args.split}",
+    )
+    axis.xaxis.set_major_formatter(PercentFormatter(xmax=1.0))
+    axis.grid(axis="x", alpha=0.3)
+    axis.legend(loc="upper right")
+    figure.tight_layout()
+    f1_scores_path = baseline_root / f"{args.split}_f1_scores.png"
+    figure.savefig(f1_scores_path, dpi=200, bbox_inches="tight")
     plt.close(figure)
 
     predictions["correct"] = predictions["true_class"] == predictions["pred_class"]
@@ -299,6 +337,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "per_class_csv": str(per_class_path),
             "confusion_matrices": str(confusion_path),
             "per_class_plot": str(per_class_plot),
+            "f1_scores_plot": str(f1_scores_path),
             "confidence_histogram": str(confidence_path),
             "top_confusions_plot": str(confusion_pairs_path),
             "official_split_counts": str(split_plot_path),

@@ -101,3 +101,5 @@ def test_analysis_cli_completes_for_all_fifty_classes(tmp_path: Path) -> None:
     assert payload["weighted_f1"] == pytest.approx(0.5)
     assert payload["generalization"]["best_checkpoint"]["epoch"] == 2
     assert payload["class_support"]["analysis_classes_below_5"] == 50
+    assert Path(payload["artifacts"]["f1_scores_plot"]).is_file()
+    assert (tmp_path / "validation_f1_scores.png").is_file()

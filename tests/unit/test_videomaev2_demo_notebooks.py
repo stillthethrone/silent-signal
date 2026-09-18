@@ -103,6 +103,7 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "silent_signal.cli.analyze_videomaev2_demo" in source
     assert "confusion_matrices.png" in source
     assert "per_class_metrics.png" in source
+    assert "f1_scores.png" in source
     assert "top_confusions.png" in source
     assert "confidence_histogram.png" in source
     assert "selected_50_official_split_counts.png" in source
