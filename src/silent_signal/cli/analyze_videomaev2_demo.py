@@ -150,10 +150,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     plt.close(figure)
 
     ordered = per_class.sort_values("f1", ascending=True)
-    figure, axis = plt.subplots(figsize=(11, 11))
+    figure, axis = plt.subplots(figsize=(12, 13))
     positions = np.arange(len(ordered))
-    axis.barh(positions - 0.18, ordered["recall"], height=0.36, label="recall")
-    axis.barh(positions + 0.18, ordered["f1"], height=0.36, label="F1")
+    axis.barh(positions - 0.24, ordered["precision"], height=0.22, label="precision")
+    axis.barh(positions, ordered["recall"], height=0.22, label="recall")
+    axis.barh(positions + 0.24, ordered["f1"], height=0.22, label="F1")
     axis.set_yticks(positions, ordered["gloss"])
     axis.set(xlim=(0, 1), xlabel="Score", title=f"Per-class metrics on {args.split}")
     axis.legend()
@@ -304,6 +305,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "macro_precision": metrics["macro avg"]["precision"],
         "macro_recall": metrics["macro avg"]["recall"],
         "macro_f1": metrics["macro avg"]["f1-score"],
+        "weighted_precision": metrics["weighted avg"]["precision"],
+        "weighted_recall": metrics["weighted avg"]["recall"],
+        "weighted_f1": metrics["weighted avg"]["f1-score"],
         "generalization": generalization,
         "class_support": class_support,
         "high_confidence_errors_at_0_8": high_confidence_errors,
@@ -321,7 +325,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     report_path = run_root / f"{args.split}_error_analysis.json"
     _write_json_atomic(report_path, report)
     print(
-        f"[{args.split}] top1={accuracy:.3f}; macro-F1={report['macro_f1']:.3f}; "
+        f"[{args.split}] top1={accuracy:.3f}; "
+        f"macro P/R/F1={report['macro_precision']:.3f}/"
+        f"{report['macro_recall']:.3f}/{report['macro_f1']:.3f}; "
+        f"weighted P/R/F1={report['weighted_precision']:.3f}/"
+        f"{report['weighted_recall']:.3f}/{report['weighted_f1']:.3f}; "
         f"samples={len(predictions)}/{evaluation.get('available_samples', '?')}",
         flush=True,
     )
@@ -341,10 +349,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         f"{args.split} classes below 5 clips={class_support['analysis_classes_below_5']}",
         flush=True,
     )
-    print("\nCác lớp recall thấp nhất:", flush=True)
+    print("\nCác lớp recall thấp nhất (precision / recall / F1):", flush=True)
     for item in lowest_recall:
         print(
-            f"- {item['gloss']}: recall={item['recall']:.3f}, "
+            f"- {item['gloss']}: precision={item['precision']:.3f}, "
+            f"recall={item['recall']:.3f}, "
             f"F1={item['f1']:.3f}, support={item['support']}",
             flush=True,
         )
