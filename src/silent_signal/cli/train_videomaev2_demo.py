@@ -10,11 +10,13 @@ import argparse
 import csv
 import hashlib
 import json
+import math
 import os
 import random
 import time
 from collections import defaultdict
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -36,6 +38,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--label-smoothing", type=float, default=0.05)
+    parser.add_argument("--early-stopping-min-epochs", type=int, default=10)
+    parser.add_argument("--early-stopping-patience", type=int, default=8)
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.001)
+    parser.add_argument("--lr-plateau-patience", type=int, default=3)
+    parser.add_argument("--lr-plateau-factor", type=float, default=0.5)
+    parser.add_argument("--minimum-learning-rate", type=float, default=1e-6)
     parser.add_argument(
         "--max-train-batches",
         type=int,
@@ -60,6 +69,67 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--run-test", action="store_true")
     return parser
+
+
+@dataclass(slots=True)
+class EarlyStoppingState:
+    """Validation-only stopping state that can be saved and resumed exactly."""
+
+    best_validation_loss: float = math.inf
+    best_epoch: int = 0
+    epochs_without_improvement: int = 0
+
+    def update(self, validation_loss: float, *, epoch: int, min_delta: float) -> bool:
+        if not math.isfinite(validation_loss):
+            raise ValueError("validation_loss must be finite.")
+        if epoch < 1:
+            raise ValueError("epoch must be one-based and positive.")
+        if min_delta < 0:
+            raise ValueError("min_delta must not be negative.")
+        improved = validation_loss < self.best_validation_loss - min_delta
+        if improved:
+            self.best_validation_loss = validation_loss
+            self.best_epoch = epoch
+            self.epochs_without_improvement = 0
+        else:
+            self.epochs_without_improvement += 1
+        return improved
+
+    def should_stop(self, *, completed_epochs: int, min_epochs: int, patience: int) -> bool:
+        if min_epochs < 1 or patience < 1:
+            raise ValueError("min_epochs and patience must be positive.")
+        return completed_epochs >= min_epochs and self.epochs_without_improvement >= patience
+
+    def to_dict(self) -> dict[str, float | int]:
+        return {
+            "best_validation_loss": self.best_validation_loss,
+            "best_epoch": self.best_epoch,
+            "epochs_without_improvement": self.epochs_without_improvement,
+        }
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> EarlyStoppingState:
+        try:
+            state = cls(
+                best_validation_loss=float(value["best_validation_loss"]),
+                best_epoch=int(value["best_epoch"]),
+                epochs_without_improvement=int(value["epochs_without_improvement"]),
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise RuntimeError("Checkpoint has invalid early-stopping state.") from exc
+        initial_state = (
+            state.best_validation_loss == math.inf
+            and state.best_epoch == 0
+            and state.epochs_without_improvement == 0
+        )
+        trained_state = (
+            math.isfinite(state.best_validation_loss)
+            and state.best_epoch >= 1
+            and state.epochs_without_improvement >= 0
+        )
+        if not initial_state and not trained_state:
+            raise RuntimeError("Checkpoint has invalid early-stopping values.")
+        return state
 
 
 def _sha256(path: Path) -> str:
@@ -105,19 +175,20 @@ def _select_demo_rows(
     for row in rows:
         source_counts[(int(row["class_index"]), str(row["split"]))] += 1
     required_splits = ("train", "validation", "test")
-    eligible = [
-        item
-        for item in source_ranked
-        if all(
-            source_counts[(int(item["subset_class_index"]), split)] > 0 for split in required_splits
-        )
-    ]
+    eligible: list[tuple[dict[str, Any], int]] = []
+    for item in source_ranked:
+        source_class_index = _selection_class_index(item)
+        if all(source_counts[(source_class_index, split)] > 0 for split in required_splits):
+            eligible.append((item, source_class_index))
     ranked = []
-    for demo_class_index, item in enumerate(eligible[:class_count]):
+    for demo_class_index, (item, source_class_index) in enumerate(eligible[:class_count]):
         ranked.append(
             {
                 **item,
-                "source_subset_class_index": int(item["subset_class_index"]),
+                "source_manifest_class_index": source_class_index,
+                "source_subset_class_index": int(
+                    item.get("source_subset_class_index", source_class_index)
+                ),
                 "demo_class_index": demo_class_index,
             }
         )
@@ -127,14 +198,14 @@ def _select_demo_rows(
             f"{class_count} are required."
         )
     source_to_demo = {
-        int(item["source_subset_class_index"]): int(item["demo_class_index"]) for item in ranked
+        int(item["source_manifest_class_index"]): int(item["demo_class_index"]) for item in ranked
     }
     selected: list[dict[str, Any]] = []
     for row in rows:
         source_class_index = int(row["class_index"])
         if source_class_index in source_to_demo:
             item: dict[str, Any] = dict(row)
-            item["source_class_index"] = source_class_index
+            item["source_class_index"] = int(item.get("source_class_index", source_class_index))
             item["class_index"] = source_to_demo[source_class_index]
             selected.append(item)
 
@@ -167,6 +238,15 @@ def _select_demo_rows(
                     f"Selected word {class_item['gloss_name']!r} has no official {split} clips."
                 )
     return selected, ranked
+
+
+def _selection_class_index(item: dict[str, Any]) -> int:
+    """Read either the top-200 selection schema or a frozen demo selection schema."""
+
+    value = item.get("subset_class_index", item.get("class_index"))
+    if value is None:
+        raise RuntimeError("Selection class is missing subset_class_index/class_index.")
+    return int(value)
 
 
 def _write_demo_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -428,19 +508,22 @@ def _loader(torch: Any, dataset: Any, batch_size: int, workers: int):
 def _checkpoint_payload(
     model: Any,
     optimizer: Any,
+    scheduler: Any,
     *,
     epoch: int,
     next_batch: int,
-    best_validation_loss: float,
+    early_stopping: EarlyStoppingState,
     history: list[dict[str, Any]],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
     return {
         "model_state": model.trainable_state_dict(),
         "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
         "epoch": epoch,
         "next_batch": next_batch,
-        "best_validation_loss": best_validation_loss,
+        "best_validation_loss": early_stopping.best_validation_loss,
+        "early_stopping": early_stopping.to_dict(),
         "history": history,
         "metadata": metadata,
     }
@@ -558,13 +641,11 @@ def _write_predictions(
     temporary.replace(path)
 
 
-def _plot_history(
-    plt: Any, history: list[dict[str, Any]], path: Path, class_count: int
-) -> None:
+def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path, class_count: int) -> None:
     if not history:
         return
     epochs = [item["epoch"] for item in history]
-    figure, axes = plt.subplots(1, 2, figsize=(11, 4))
+    figure, axes = plt.subplots(1, 3, figsize=(16, 4))
     axes[0].plot(epochs, [item["train_loss"] for item in history], marker="o", label="train")
     axes[0].plot(
         epochs, [item["validation_loss"] for item in history], marker="o", label="validation"
@@ -579,9 +660,16 @@ def _plot_history(
     axes[1].set(title="Top-1 accuracy", xlabel="Epoch", ylabel="Accuracy", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
-    figure.suptitle(
-        f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo"
+    axes[2].plot(
+        epochs,
+        [item["next_learning_rate"] for item in history],
+        marker="o",
+        color="#6a4c93",
     )
+    axes[2].set(title="Learning rate", xlabel="Epoch", ylabel="Next epoch LR")
+    axes[2].set_yscale("log")
+    axes[2].grid(alpha=0.3)
+    figure.suptitle(f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo")
     figure.tight_layout()
     figure.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -593,6 +681,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("This research demo is intentionally fixed to 50 classes.")
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
+    if not 1 <= args.early_stopping_min_epochs <= args.epochs:
+        raise ValueError("early-stopping-min-epochs must be between 1 and epochs.")
+    if args.early_stopping_patience < 1:
+        raise ValueError("early-stopping-patience must be positive.")
+    if args.early_stopping_min_delta < 0:
+        raise ValueError("early-stopping-min-delta must not be negative.")
+    if args.lr_plateau_patience < 0:
+        raise ValueError("lr-plateau-patience must not be negative.")
+    if not 0.0 < args.lr_plateau_factor < 1.0:
+        raise ValueError("lr-plateau-factor must be between 0 and 1.")
+    if not 0.0 <= args.minimum_learning_rate <= args.learning_rate:
+        raise ValueError("minimum-learning-rate must be between 0 and learning-rate.")
+    if not 0.0 <= args.label_smoothing < 1.0:
+        raise ValueError("label-smoothing must be in [0, 1).")
 
     # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
     # Transformers probe those optional backends can import a JAX build that is
@@ -741,7 +843,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
-    criterion = torch.nn.CrossEntropyLoss()
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
+        optimizer,
+        mode="min",
+        factor=args.lr_plateau_factor,
+        patience=args.lr_plateau_patience,
+        threshold=args.early_stopping_min_delta,
+        threshold_mode="abs",
+        min_lr=args.minimum_learning_rate,
+    )
+    train_criterion = torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
+    evaluation_criterion = torch.nn.CrossEntropyLoss()
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
     VideoDataset = _make_dataset_class(torch, cv2, np)
     last_checkpoint = output_root / "last_checkpoint.pt"
@@ -762,12 +874,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
+        "label_smoothing": args.label_smoothing,
+        "early_stopping_min_epochs": args.early_stopping_min_epochs,
+        "early_stopping_patience": args.early_stopping_patience,
+        "early_stopping_min_delta": args.early_stopping_min_delta,
+        "lr_plateau_patience": args.lr_plateau_patience,
+        "lr_plateau_factor": args.lr_plateau_factor,
+        "minimum_learning_rate": args.minimum_learning_rate,
         "max_train_batches": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
     }
     start_epoch = 0
     start_batch = 0
-    best_validation_loss = float("inf")
+    early_stopping = EarlyStoppingState()
     history: list[dict[str, Any]] = []
     if args.resume and last_checkpoint.is_file():
         checkpoint = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
@@ -775,17 +894,42 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise RuntimeError("Existing checkpoint metadata differs from this run configuration.")
         model.load_trainable_state_dict(checkpoint["model_state"])
         optimizer.load_state_dict(checkpoint["optimizer_state"])
+        try:
+            scheduler.load_state_dict(checkpoint["scheduler_state"])
+            early_stopping = EarlyStoppingState.from_dict(checkpoint["early_stopping"])
+        except KeyError as exc:
+            raise RuntimeError(
+                "Existing checkpoint predates resumable early stopping. "
+                "Use a new output root for this training configuration."
+            ) from exc
         start_epoch = int(checkpoint["epoch"])
         start_batch = int(checkpoint.get("next_batch", 0))
-        best_validation_loss = float(checkpoint["best_validation_loss"])
         history = list(checkpoint.get("history", ()))
         print(
-            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; history={len(history)} epochs",
+            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; "
+            f"history={len(history)} epochs; best_epoch={early_stopping.best_epoch}; "
+            f"stale={early_stopping.epochs_without_improvement}",
             flush=True,
         )
 
     run_started = time.perf_counter()
+    stopped_early = (
+        start_batch == 0
+        and start_epoch < args.epochs
+        and early_stopping.should_stop(
+            completed_epochs=start_epoch,
+            min_epochs=args.early_stopping_min_epochs,
+            patience=args.early_stopping_patience,
+        )
+    )
+    if stopped_early:
+        print(
+            "RESUME: early-stopping condition was already reached; skipping further training.",
+            flush=True,
+        )
     for epoch in range(start_epoch, args.epochs):
+        if stopped_early:
+            break
         maximum_train = args.max_train_batches * args.batch_size
         epoch_rows = _balanced_cap(split_rows["train"], maximum_train, args.seed + epoch)
         train_dataset = VideoDataset(epoch_rows, args.dataset_root, training=True)
@@ -794,14 +938,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         def save_progress(
             next_batch: int,
             current_epoch: int = epoch,
-            current_best: float = best_validation_loss,
         ) -> None:
             payload = _checkpoint_payload(
                 model,
                 optimizer,
+                scheduler,
                 epoch=current_epoch,
                 next_batch=next_batch,
-                best_validation_loss=current_best,
+                early_stopping=early_stopping,
                 history=history,
                 metadata=metadata,
             )
@@ -816,7 +960,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=model,
             loader=train_loader,
             device=device,
-            criterion=criterion,
+            criterion=train_criterion,
             optimizer=optimizer,
             scaler=scaler,
             phase="train",
@@ -844,7 +988,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=model,
             loader=validation_loader,
             device=device,
-            criterion=criterion,
+            criterion=evaluation_criterion,
             optimizer=None,
             scaler=scaler,
             phase="validation",
@@ -852,28 +996,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             epochs=args.epochs,
             progress_every=args.progress_every,
         )
+        completed_epoch = epoch + 1
+        learning_rate = float(optimizer.param_groups[0]["lr"])
+        improved = early_stopping.update(
+            validation_metrics["loss"],
+            epoch=completed_epoch,
+            min_delta=args.early_stopping_min_delta,
+        )
+        scheduler.step(validation_metrics["loss"])
+        next_learning_rate = float(optimizer.param_groups[0]["lr"])
         record = {
-            "epoch": epoch + 1,
+            "epoch": completed_epoch,
             "train_loss": train_metrics["loss"],
             "train_top1": train_metrics["top1_accuracy"],
             "train_samples": int(train_metrics["samples"]),
             "validation_loss": validation_metrics["loss"],
             "validation_top1": validation_metrics["top1_accuracy"],
             "validation_samples": int(validation_metrics["samples"]),
+            "learning_rate": learning_rate,
+            "next_learning_rate": next_learning_rate,
+            "improved": improved,
+            "epochs_without_improvement": early_stopping.epochs_without_improvement,
         }
         history.append(record)
-        improved = validation_metrics["loss"] < best_validation_loss
         if improved:
-            best_validation_loss = validation_metrics["loss"]
             _save_torch_atomic(
                 torch,
                 best_checkpoint,
                 _checkpoint_payload(
                     model,
                     optimizer,
-                    epoch=epoch + 1,
+                    scheduler,
+                    epoch=completed_epoch,
                     next_batch=0,
-                    best_validation_loss=best_validation_loss,
+                    early_stopping=early_stopping,
                     history=history,
                     metadata=metadata,
                 ),
@@ -884,9 +1040,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             _checkpoint_payload(
                 model,
                 optimizer,
-                epoch=epoch + 1,
+                scheduler,
+                epoch=completed_epoch,
                 next_batch=0,
-                best_validation_loss=best_validation_loss,
+                early_stopping=early_stopping,
                 history=history,
                 metadata=metadata,
             ),
@@ -894,11 +1051,27 @@ def main(argv: Sequence[str] | None = None) -> int:
         _write_json_atomic(output_root / "history.json", {"history": history})
         _plot_history(plt, history, output_root / "training_curves.png", args.classes)
         print(
-            f"[epoch {epoch + 1}] train top1={record['train_top1']:.3f}; "
-            f"validation top1={record['validation_top1']:.3f}; best={improved}",
+            f"[epoch {completed_epoch}] train top1={record['train_top1']:.3f}; "
+            f"validation top1={record['validation_top1']:.3f}; best={improved}; "
+            f"stale={early_stopping.epochs_without_improvement}/"
+            f"{args.early_stopping_patience}; lr={learning_rate:.3e}->{next_learning_rate:.3e}",
             flush=True,
         )
         start_batch = 0
+        stopped_early = completed_epoch < args.epochs and early_stopping.should_stop(
+            completed_epochs=completed_epoch,
+            min_epochs=args.early_stopping_min_epochs,
+            patience=args.early_stopping_patience,
+        )
+        if stopped_early:
+            print(
+                f"EARLY STOP: validation loss did not improve by at least "
+                f"{args.early_stopping_min_delta:g} for "
+                f"{early_stopping.epochs_without_improvement} epochs. "
+                f"Best epoch={early_stopping.best_epoch}, "
+                f"best validation loss={early_stopping.best_validation_loss:.6f}.",
+                flush=True,
+            )
 
     if not best_checkpoint.is_file():
         raise RuntimeError("No best checkpoint was created.")
@@ -926,7 +1099,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=model,
             loader=evaluation_loader,
             device=device,
-            criterion=criterion,
+            criterion=evaluation_criterion,
             optimizer=None,
             scaler=scaler,
             phase=f"final-{split}",
@@ -956,6 +1129,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         "trainable_parameters": trainable,
         "requested_epochs": args.epochs,
         "completed_epochs": len(history),
+        "early_stopping": {
+            "monitor": "validation_loss",
+            "minimum_epochs": args.early_stopping_min_epochs,
+            "patience": args.early_stopping_patience,
+            "minimum_delta": args.early_stopping_min_delta,
+            "stopped_early": stopped_early,
+            "stop_epoch": len(history) if stopped_early else None,
+            **early_stopping.to_dict(),
+        },
+        "learning_rate_scheduler": {
+            "name": "ReduceLROnPlateau",
+            "patience": args.lr_plateau_patience,
+            "factor": args.lr_plateau_factor,
+            "minimum_learning_rate": args.minimum_learning_rate,
+            "final_learning_rate": float(optimizer.param_groups[0]["lr"]),
+        },
         "max_train_batches_per_epoch": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
         "history": history,
