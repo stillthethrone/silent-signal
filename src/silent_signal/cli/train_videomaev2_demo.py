@@ -49,10 +49,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Zero uses every official validation/test clip.",
     )
-    parser.add_argument("--rgb-embedding-dim", type=int, default=256)
-    parser.add_argument("--rgb-layers", type=int, default=2)
-    parser.add_argument("--rgb-heads", type=int, default=8)
-    parser.add_argument("--rgb-dropout", type=float, default=0.3)
+    parser.add_argument("--rgb-embedding-dim", type=int, default=128)
+    parser.add_argument("--rgb-layers", type=int, default=1)
+    parser.add_argument("--rgb-heads", type=int, default=4)
+    parser.add_argument("--rgb-dropout", type=float, default=0.4)
     parser.add_argument(
         "--random-crop-scale-min",
         type=float,

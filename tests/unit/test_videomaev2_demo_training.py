@@ -141,7 +141,10 @@ def test_regularized_baseline_defaults_are_conservative() -> None:
         ]
     )
 
-    assert args.rgb_dropout == 0.3
+    assert args.rgb_embedding_dim == 128
+    assert args.rgb_layers == 1
+    assert args.rgb_heads == 4
+    assert args.rgb_dropout == 0.4
     assert args.label_smoothing == 0.1
     assert args.weight_decay == 0.01
     assert args.random_crop_scale_min == 0.85

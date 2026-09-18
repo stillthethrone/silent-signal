@@ -43,8 +43,9 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "MAX_EVAL_BATCHES" in source
     assert "MAX_TRAIN_BATCHES = 0" in source
     assert "MAX_EVAL_BATCHES = 0" in source
-    assert "RGB_LAYERS = 2" in source
-    assert "RGB_HEADS = 8" in source
+    assert "RGB_EMBEDDING_DIM = 128" in source
+    assert "RGB_LAYERS = 1" in source
+    assert "RGB_HEADS = 4" in source
     assert "RGB Transformer" in source
     assert "numpy==2.1.3" in source
     assert "USE_TF'] = '0'" in source
@@ -53,7 +54,7 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "CHECKPOINT_EVERY" in source
     assert "EARLY_STOPPING_PATIENCE = 5" in source
     assert "EARLY_STOPPING_MIN_DELTA = 0.005" in source
-    assert "RGB_DROPOUT = 0.3" in source
+    assert "RGB_DROPOUT = 0.4" in source
     assert "LABEL_SMOOTHING = 0.1" in source
     assert "WEIGHT_DECAY = 0.01" in source
     assert "RANDOM_CROP_SCALE_MIN = 0.85" in source
@@ -67,7 +68,7 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "PERSIST_VIDEO_CACHE = True" in source
     assert "datasets/asl_citizen_top30" in source
     assert "tái sử dụng cache top-30" in source
-    assert "videomaev2_rgb_transformer_demo50_e50_regularized_v1" in source
+    assert "videomaev2_rgb_transformer_demo50_e50_compact_v1" in source
     assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
@@ -77,7 +78,7 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     notebook, source = _source(_ANALYSIS_NOTEBOOK)
     _assert_clean(notebook)
     assert "ANALYSIS_SPLIT = 'validation'" in source
-    assert "videomaev2_rgb_transformer_demo50_e50_regularized_v1" in source
+    assert "videomaev2_rgb_transformer_demo50_e50_compact_v1" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
     assert "drive_ready" in source
     assert "force_remount=True" in source
