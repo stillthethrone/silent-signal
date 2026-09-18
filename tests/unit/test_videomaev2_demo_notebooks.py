@@ -7,6 +7,7 @@ from pathlib import Path
 _ROOT = Path(__file__).parents[2]
 _TRAIN_NOTEBOOK = _ROOT / "notebooks/07_asl_citizen_top30_videomaev2_rgb_transformer_baseline.ipynb"
 _ANALYSIS_NOTEBOOK = _ROOT / "notebooks/08_asl_citizen_top30_videomaev2_error_analysis.ipynb"
+_DUAL_NOTEBOOK = _ROOT / "notebooks/09_asl_citizen_top50_dual_stream_demo.ipynb"
 
 
 def _source(path: Path) -> tuple[dict[str, object], str]:
@@ -111,3 +112,14 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "generalization" in source
     assert "class_support" in source
     assert "Macro-F1" in source
+
+
+def test_dual_stream_notebook_can_train_while_baseline_is_still_training() -> None:
+    notebook, source = _source(_DUAL_NOTEBOOK)
+    _assert_clean(notebook)
+    assert "SELECTED_MANIFEST = BASELINE_ROOT / 'manifests/all.csv'" in source
+    assert "SELECTED_WORDS = BASELINE_ROOT / 'selected_50_words.json'" in source
+    assert "required = [SELECTED_MANIFEST, SELECTED_WORDS, GRAPH_REPORT]" in source
+    assert "BASELINE_REPORT" not in source
+    assert "'--baseline-report'" not in source
+    assert "có thể chạy song song" in source
