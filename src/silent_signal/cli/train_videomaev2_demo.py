@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument(
         "--max-train-batches",
         type=int,
@@ -48,11 +49,31 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Zero uses every official validation/test clip.",
     )
-    parser.add_argument("--rgb-embedding-dim", type=int, default=256)
-    parser.add_argument("--rgb-layers", type=int, default=2)
-    parser.add_argument("--rgb-heads", type=int, default=8)
-    parser.add_argument("--rgb-dropout", type=float, default=0.1)
+    parser.add_argument("--rgb-embedding-dim", type=int, default=128)
+    parser.add_argument("--rgb-layers", type=int, default=1)
+    parser.add_argument("--rgb-heads", type=int, default=4)
+    parser.add_argument("--rgb-dropout", type=float, default=0.4)
+    parser.add_argument(
+        "--random-crop-scale-min",
+        type=float,
+        default=0.85,
+        help="Smallest square crop scale for training; validation always uses a center crop.",
+    )
+    parser.add_argument(
+        "--color-jitter",
+        type=float,
+        default=0.1,
+        help="Per-video brightness/contrast jitter strength for training; zero disables.",
+    )
+    parser.add_argument("--gradient-clip-norm", type=float, default=1.0)
     parser.add_argument("--checkpoint-every", type=int, default=20)
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=7,
+        help="Stop after this many validation epochs without loss improvement; zero disables.",
+    )
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -229,12 +250,16 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
             frames: int = 16,
             size: int = 224,
             training: bool = False,
+            random_crop_scale_min: float = 1.0,
+            color_jitter: float = 0.0,
         ) -> None:
             self.rows = rows
             self.dataset_root = dataset_root
             self.frames = frames
             self.size = size
             self.training = training
+            self.random_crop_scale_min = random_crop_scale_min
+            self.color_jitter = color_jitter
 
         def __len__(self) -> int:
             return len(self.rows)
@@ -270,6 +295,11 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                     for i in range(self.frames)
                 ]
             target_set = set(targets)
+            crop_scale = (
+                float(np.random.uniform(self.random_crop_scale_min, 1.0)) if self.training else 1.0
+            )
+            crop_y = float(np.random.uniform()) if self.training else 0.5
+            crop_x = float(np.random.uniform()) if self.training else 0.5
             decoded: dict[int, Any] = {}
             position = 0
             while position <= targets[-1]:
@@ -277,7 +307,12 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                 if not ok:
                     break
                 if position in target_set:
-                    decoded[position] = self._resize_crop(frame)
+                    decoded[position] = self._resize_crop(
+                        frame,
+                        crop_scale=crop_scale,
+                        crop_y=crop_y,
+                        crop_x=crop_x,
+                    )
                 position += 1
             capture.release()
             if not decoded:
@@ -287,21 +322,37 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                 decoded[min(available, key=lambda value: abs(value - target))] for target in targets
             ]
             array = np.stack(frames).astype("float32") / 255.0
+            if self.training and self.color_jitter > 0:
+                brightness = float(
+                    np.random.uniform(1.0 - self.color_jitter, 1.0 + self.color_jitter)
+                )
+                contrast = float(
+                    np.random.uniform(1.0 - self.color_jitter, 1.0 + self.color_jitter)
+                )
+                array = (array - 0.5) * contrast + 0.5
+                array = np.clip(array * brightness, 0.0, 1.0)
             array = (array - 0.5) / 0.5
             return torch.from_numpy(array).permute(3, 0, 1, 2).contiguous()
 
-        def _resize_crop(self, bgr: Any):
+        def _resize_crop(
+            self,
+            bgr: Any,
+            *,
+            crop_scale: float,
+            crop_y: float,
+            crop_x: float,
+        ):
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             height, width = rgb.shape[:2]
-            scale = self.size / min(height, width)
-            resized = cv2.resize(
-                rgb,
-                (round(width * scale), round(height * scale)),
+            crop_size = max(2, round(min(height, width) * crop_scale))
+            top = round(max(0, height - crop_size) * crop_y)
+            left = round(max(0, width - crop_size) * crop_x)
+            cropped = rgb[top : top + crop_size, left : left + crop_size]
+            return cv2.resize(
+                cropped,
+                (self.size, self.size),
                 interpolation=cv2.INTER_LINEAR,
             )
-            top = max(0, (resized.shape[0] - self.size) // 2)
-            left = max(0, (resized.shape[1] - self.size) // 2)
-            return resized[top : top + self.size, left : left + self.size]
 
     return VideoDataset
 
@@ -432,6 +483,7 @@ def _checkpoint_payload(
     epoch: int,
     next_batch: int,
     best_validation_loss: float,
+    early_stopping_bad_epochs: int,
     history: list[dict[str, Any]],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
@@ -441,9 +493,55 @@ def _checkpoint_payload(
         "epoch": epoch,
         "next_batch": next_batch,
         "best_validation_loss": best_validation_loss,
+        "early_stopping_bad_epochs": early_stopping_bad_epochs,
         "history": history,
         "metadata": metadata,
     }
+
+
+def _trailing_non_improving_epochs(history: list[dict[str, Any]], min_delta: float) -> int:
+    best = float("inf")
+    bad_epochs = 0
+    for item in history:
+        validation_loss = float(item["validation_loss"])
+        if validation_loss < best - min_delta:
+            best = validation_loss
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+    return bad_epochs
+
+
+def _macro_f1_from_predictions(predictions: list[dict[str, Any]], class_count: int) -> float:
+    """Return the unweighted mean of the per-class F1 scores.
+
+    Classes with no true positives receive F1=0. Averaging over the complete
+    class list gives every gloss the same influence, regardless of how many
+    clips it contributes.
+    """
+    true_positives = [0] * class_count
+    false_positives = [0] * class_count
+    false_negatives = [0] * class_count
+    for item in predictions:
+        true_class = int(item["true_class"])
+        pred_class = int(item["pred_class"])
+        if true_class == pred_class:
+            true_positives[true_class] += 1
+        else:
+            false_negatives[true_class] += 1
+            false_positives[pred_class] += 1
+
+    per_class_f1 = []
+    for class_index in range(class_count):
+        denominator = (
+            2 * true_positives[class_index]
+            + false_positives[class_index]
+            + false_negatives[class_index]
+        )
+        per_class_f1.append(
+            0.0 if denominator == 0 else 2 * true_positives[class_index] / denominator
+        )
+    return sum(per_class_f1) / class_count
 
 
 def _run_epoch(
@@ -458,10 +556,12 @@ def _run_epoch(
     phase: str,
     epoch: int,
     epochs: int,
+    class_count: int,
     progress_every: int,
     start_batch: int = 0,
     checkpoint_every: int = 0,
     checkpoint_callback: Any | None = None,
+    gradient_clip_norm: float = 0.0,
 ) -> tuple[dict[str, float], list[dict[str, Any]]]:
     training = optimizer is not None
     model.train(training)
@@ -488,6 +588,12 @@ def _run_epoch(
                 loss = criterion(logits, labels)
             if training:
                 scaler.scale(loss).backward()
+                if gradient_clip_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        (parameter for parameter in model.parameters() if parameter.requires_grad),
+                        gradient_clip_norm,
+                    )
                 scaler.step(optimizer)
                 scaler.update()
         batch_size = labels.numel()
@@ -531,6 +637,7 @@ def _run_epoch(
     return {
         "loss": total_loss / total_samples,
         "top1_accuracy": total_correct / total_samples,
+        "macro_f1": _macro_f1_from_predictions(predictions, class_count),
         "samples": float(total_samples),
         "duration_seconds": time.perf_counter() - started,
     }, predictions
@@ -558,9 +665,7 @@ def _write_predictions(
     temporary.replace(path)
 
 
-def _plot_history(
-    plt: Any, history: list[dict[str, Any]], path: Path, class_count: int
-) -> None:
+def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path, class_count: int) -> None:
     if not history:
         return
     epochs = [item["epoch"] for item in history]
@@ -572,16 +677,32 @@ def _plot_history(
     axes[0].set(title="Loss", xlabel="Epoch", ylabel="Cross entropy")
     axes[0].legend()
     axes[0].grid(alpha=0.3)
-    axes[1].plot(epochs, [item["train_top1"] for item in history], marker="o", label="train")
+    axes[1].plot(epochs, [item["train_top1"] for item in history], marker="o", label="train top-1")
     axes[1].plot(
-        epochs, [item["validation_top1"] for item in history], marker="o", label="validation"
+        epochs,
+        [item["validation_top1"] for item in history],
+        marker="o",
+        label="validation top-1",
     )
-    axes[1].set(title="Top-1 accuracy", xlabel="Epoch", ylabel="Accuracy", ylim=(0, 1))
+    if all("train_macro_f1" in item and "validation_macro_f1" in item for item in history):
+        axes[1].plot(
+            epochs,
+            [item["train_macro_f1"] for item in history],
+            marker="x",
+            linestyle="--",
+            label="train macro-F1",
+        )
+        axes[1].plot(
+            epochs,
+            [item["validation_macro_f1"] for item in history],
+            marker="x",
+            linestyle="--",
+            label="validation macro-F1",
+        )
+    axes[1].set(title="Top-1 and macro-F1", xlabel="Epoch", ylabel="Score", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
-    figure.suptitle(
-        f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo"
-    )
+    figure.suptitle(f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo")
     figure.tight_layout()
     figure.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -593,6 +714,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("This research demo is intentionally fixed to 50 classes.")
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
+    if args.early_stopping_patience < 0 or args.early_stopping_min_delta < 0:
+        raise ValueError("Early-stopping patience and min-delta must be non-negative.")
+    if not 0 <= args.label_smoothing < 1:
+        raise ValueError("label-smoothing must be in [0, 1).")
+    if not 0 < args.random_crop_scale_min <= 1:
+        raise ValueError("random-crop-scale-min must be in (0, 1].")
+    if not 0 <= args.color_jitter < 1:
+        raise ValueError("color-jitter must be in [0, 1).")
+    if args.gradient_clip_norm < 0:
+        raise ValueError("gradient-clip-norm must be non-negative.")
 
     # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
     # Transformers probe those optional backends can import a JAX build that is
@@ -741,7 +872,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
     VideoDataset = _make_dataset_class(torch, cv2, np)
     last_checkpoint = output_root / "last_checkpoint.pt"
@@ -762,12 +893,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
+        "label_smoothing": args.label_smoothing,
+        "random_crop_scale_min": args.random_crop_scale_min,
+        "color_jitter": args.color_jitter,
+        "gradient_clip_norm": args.gradient_clip_norm,
         "max_train_batches": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
     }
     start_epoch = 0
     start_batch = 0
     best_validation_loss = float("inf")
+    early_stopping_bad_epochs = 0
+    stopped_early = False
     history: list[dict[str, Any]] = []
     if args.resume and last_checkpoint.is_file():
         checkpoint = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
@@ -779,8 +916,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_batch = int(checkpoint.get("next_batch", 0))
         best_validation_loss = float(checkpoint["best_validation_loss"])
         history = list(checkpoint.get("history", ()))
+        early_stopping_bad_epochs = int(
+            checkpoint.get(
+                "early_stopping_bad_epochs",
+                _trailing_non_improving_epochs(history, args.early_stopping_min_delta),
+            )
+        )
         print(
-            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; history={len(history)} epochs",
+            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; "
+            f"history={len(history)} epochs; early-stop wait={early_stopping_bad_epochs}/"
+            f"{args.early_stopping_patience}",
             flush=True,
         )
 
@@ -788,13 +933,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     for epoch in range(start_epoch, args.epochs):
         maximum_train = args.max_train_batches * args.batch_size
         epoch_rows = _balanced_cap(split_rows["train"], maximum_train, args.seed + epoch)
-        train_dataset = VideoDataset(epoch_rows, args.dataset_root, training=True)
+        train_dataset = VideoDataset(
+            epoch_rows,
+            args.dataset_root,
+            training=True,
+            random_crop_scale_min=args.random_crop_scale_min,
+            color_jitter=args.color_jitter,
+        )
         train_loader = _loader(torch, train_dataset, args.batch_size, args.num_workers)
 
         def save_progress(
             next_batch: int,
             current_epoch: int = epoch,
             current_best: float = best_validation_loss,
+            current_bad_epochs: int = early_stopping_bad_epochs,
         ) -> None:
             payload = _checkpoint_payload(
                 model,
@@ -802,6 +954,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 epoch=current_epoch,
                 next_batch=next_batch,
                 best_validation_loss=current_best,
+                early_stopping_bad_epochs=current_bad_epochs,
                 history=history,
                 metadata=metadata,
             )
@@ -822,10 +975,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase="train",
             epoch=epoch,
             epochs=args.epochs,
+            class_count=args.classes,
             progress_every=args.progress_every,
             start_batch=start_batch if epoch == start_epoch else 0,
             checkpoint_every=args.checkpoint_every,
             checkpoint_callback=save_progress,
+            gradient_clip_norm=args.gradient_clip_norm,
         )
         validation_rows = _balanced_cap(
             split_rows["validation"],
@@ -850,21 +1005,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase="validation",
             epoch=epoch,
             epochs=args.epochs,
+            class_count=args.classes,
             progress_every=args.progress_every,
         )
         record = {
             "epoch": epoch + 1,
             "train_loss": train_metrics["loss"],
             "train_top1": train_metrics["top1_accuracy"],
+            "train_macro_f1": train_metrics["macro_f1"],
             "train_samples": int(train_metrics["samples"]),
             "validation_loss": validation_metrics["loss"],
             "validation_top1": validation_metrics["top1_accuracy"],
+            "validation_macro_f1": validation_metrics["macro_f1"],
             "validation_samples": int(validation_metrics["samples"]),
         }
-        history.append(record)
-        improved = validation_metrics["loss"] < best_validation_loss
+        improved = validation_metrics["loss"] < best_validation_loss - args.early_stopping_min_delta
         if improved:
             best_validation_loss = validation_metrics["loss"]
+            early_stopping_bad_epochs = 0
+        else:
+            early_stopping_bad_epochs += 1
+        record["improved"] = improved
+        record["early_stopping_bad_epochs"] = early_stopping_bad_epochs
+        history.append(record)
+        if improved:
             _save_torch_atomic(
                 torch,
                 best_checkpoint,
@@ -874,6 +1038,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     epoch=epoch + 1,
                     next_batch=0,
                     best_validation_loss=best_validation_loss,
+                    early_stopping_bad_epochs=early_stopping_bad_epochs,
                     history=history,
                     metadata=metadata,
                 ),
@@ -887,6 +1052,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 epoch=epoch + 1,
                 next_batch=0,
                 best_validation_loss=best_validation_loss,
+                early_stopping_bad_epochs=early_stopping_bad_epochs,
                 history=history,
                 metadata=metadata,
             ),
@@ -895,10 +1061,26 @@ def main(argv: Sequence[str] | None = None) -> int:
         _plot_history(plt, history, output_root / "training_curves.png", args.classes)
         print(
             f"[epoch {epoch + 1}] train top1={record['train_top1']:.3f}; "
-            f"validation top1={record['validation_top1']:.3f}; best={improved}",
+            f"macro-F1={record['train_macro_f1']:.3f}; "
+            f"validation top1={record['validation_top1']:.3f}; "
+            f"macro-F1={record['validation_macro_f1']:.3f}; best={improved}; "
+            f"early-stop wait={early_stopping_bad_epochs}/{args.early_stopping_patience}",
             flush=True,
         )
         start_batch = 0
+        if (
+            args.early_stopping_patience > 0
+            and early_stopping_bad_epochs >= args.early_stopping_patience
+        ):
+            stopped_early = True
+            print(
+                f"EARLY STOP at epoch {epoch + 1}: validation loss did not improve by "
+                f"at least {args.early_stopping_min_delta:g} for "
+                f"{early_stopping_bad_epochs} consecutive epochs. "
+                f"Restoring best checkpoint.",
+                flush=True,
+            )
+            break
 
     if not best_checkpoint.is_file():
         raise RuntimeError("No best checkpoint was created.")
@@ -932,6 +1114,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase=f"final-{split}",
             epoch=max(0, len(history) - 1),
             epochs=max(1, len(history)),
+            class_count=args.classes,
             progress_every=args.progress_every,
         )
         prediction_path = output_root / f"{split}_predictions.csv"
@@ -956,6 +1139,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "trainable_parameters": trainable,
         "requested_epochs": args.epochs,
         "completed_epochs": len(history),
+        "best_epoch": int(best["epoch"]),
+        "best_validation_loss": float(best["best_validation_loss"]),
+        "early_stopping": {
+            "patience": args.early_stopping_patience,
+            "min_delta": args.early_stopping_min_delta,
+            "triggered": stopped_early,
+            "stopped_epoch": int(history[-1]["epoch"]) if stopped_early else None,
+        },
         "max_train_batches_per_epoch": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
         "history": history,

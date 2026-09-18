@@ -50,7 +50,7 @@ smoke:
   seed: 7
 expected:
   manifest_sha256: {sha256_file(manifest)}
-  preprocessing_fingerprint: {'f' * 64}
+  preprocessing_fingerprint: {"f" * 64}
 """,
         encoding="utf-8",
     )
@@ -100,9 +100,9 @@ def _sample(record: ManifestRecord) -> GraphPoseSample:
         sample_id=record.sample_id,
         class_index=record.class_index,
         split="train",
-        features=np.random.default_rng(record.class_index).normal(
-            size=(4, 5, 7)
-        ).astype(np.float32),
+        features=np.random.default_rng(record.class_index)
+        .normal(size=(4, 5, 7))
+        .astype(np.float32),
         joint_mask=np.ones((4, 5), dtype=np.bool_),
         observed_mask=np.ones((4, 5), dtype=np.bool_),
         frame_mask=np.ones((4,), dtype=np.bool_),

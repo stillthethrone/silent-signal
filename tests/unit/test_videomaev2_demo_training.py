@@ -5,7 +5,13 @@ from pathlib import Path
 
 import pytest
 
-from silent_signal.cli.train_videomaev2_demo import _balanced_cap, _select_demo_rows
+from silent_signal.cli.train_videomaev2_demo import (
+    _balanced_cap,
+    _macro_f1_from_predictions,
+    _select_demo_rows,
+    _trailing_non_improving_epochs,
+    build_parser,
+)
 
 _ROOT = Path(__file__).parents[2]
 _TRAINER = _ROOT / "src/silent_signal/cli/train_videomaev2_demo.py"
@@ -80,6 +86,71 @@ def test_balanced_cap_represents_every_class_before_repeating() -> None:
     assert {int(row["class_index"]) for row in selected} == set(range(50))
 
 
+def test_early_stopping_counts_only_epochs_after_the_latest_improvement() -> None:
+    history = [
+        {"validation_loss": 3.0},
+        {"validation_loss": 2.0},
+        {"validation_loss": 2.1},
+        {"validation_loss": 2.2},
+    ]
+
+    assert _trailing_non_improving_epochs(history, min_delta=0.0) == 2
+
+
+def test_early_stopping_min_delta_rejects_tiny_improvements() -> None:
+    history = [
+        {"validation_loss": 2.0},
+        {"validation_loss": 1.9995},
+        {"validation_loss": 1.9990},
+    ]
+
+    assert _trailing_non_improving_epochs(history, min_delta=0.001) == 2
+
+
+def test_macro_f1_gives_each_class_equal_weight() -> None:
+    predictions = [
+        {"true_class": 0, "pred_class": 0},
+        {"true_class": 1, "pred_class": 0},
+    ]
+
+    # Class 0 F1 is 2/3, class 1 F1 is 0, so their unweighted mean is 1/3.
+    assert _macro_f1_from_predictions(predictions, class_count=2) == pytest.approx(1 / 3)
+
+
+def test_macro_f1_is_one_when_every_class_is_correct() -> None:
+    predictions = [
+        {"true_class": class_index, "pred_class": class_index} for class_index in range(50)
+    ]
+
+    assert _macro_f1_from_predictions(predictions, class_count=50) == 1.0
+
+
+def test_regularized_baseline_defaults_are_conservative() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--manifest",
+            "manifest.csv",
+            "--selection-report",
+            "selection.json",
+            "--dataset-root",
+            "dataset",
+            "--output-root",
+            "output",
+        ]
+    )
+
+    assert args.rgb_embedding_dim == 128
+    assert args.rgb_layers == 1
+    assert args.rgb_heads == 4
+    assert args.rgb_dropout == 0.4
+    assert args.label_smoothing == 0.1
+    assert args.weight_decay == 0.01
+    assert args.random_crop_scale_min == 0.85
+    assert args.color_jitter == 0.1
+    assert args.gradient_clip_norm == 1.0
+
+
 def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> None:
     source = _TRAINER.read_text(encoding="utf-8")
 
@@ -92,5 +163,9 @@ def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> Non
     assert "torch.nn.TransformerEncoder(" in source
     assert "self.rgb_transformer(tokens)" in source
     assert "self.classifier(feature)" in source
+    assert "CrossEntropyLoss(label_smoothing=args.label_smoothing)" in source
+    assert "clip_grad_norm_" in source
+    assert "random_crop_scale_min" in source
+    assert "color_jitter" in source
     assert 'manifest_root / f"{split}.csv"' in source
     assert 'default=0,\n        help="Zero uses every official training clip."' in source

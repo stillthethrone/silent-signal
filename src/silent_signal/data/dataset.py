@@ -22,9 +22,7 @@ class GraphPoseDataset(Sequence[GraphPoseSample]):
         split: str | None = None,
         expected_fingerprint: str | None = None,
     ) -> None:
-        self.records = tuple(
-            record for record in records if split is None or record.split == split
-        )
+        self.records = tuple(record for record in records if split is None or record.split == split)
         if not self.records:
             raise ValueError("GraphPoseDataset selection is empty.")
         self.cache_root = Path(cache_root)
