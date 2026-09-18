@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from silent_signal.cli.train_videomaev2_demo import _balanced_cap, _select_demo_rows
+from silent_signal.cli.train_videomaev2_demo import (
+    _balanced_cap,
+    _select_demo_rows,
+    _trailing_non_improving_epochs,
+)
 
 _ROOT = Path(__file__).parents[2]
 _TRAINER = _ROOT / "src/silent_signal/cli/train_videomaev2_demo.py"
@@ -78,6 +82,27 @@ def test_balanced_cap_represents_every_class_before_repeating() -> None:
 
     assert len(selected) == 50
     assert {int(row["class_index"]) for row in selected} == set(range(50))
+
+
+def test_early_stopping_counts_only_epochs_after_the_latest_improvement() -> None:
+    history = [
+        {"validation_loss": 3.0},
+        {"validation_loss": 2.0},
+        {"validation_loss": 2.1},
+        {"validation_loss": 2.2},
+    ]
+
+    assert _trailing_non_improving_epochs(history, min_delta=0.0) == 2
+
+
+def test_early_stopping_min_delta_rejects_tiny_improvements() -> None:
+    history = [
+        {"validation_loss": 2.0},
+        {"validation_loss": 1.9995},
+        {"validation_loss": 1.9990},
+    ]
+
+    assert _trailing_non_improving_epochs(history, min_delta=0.001) == 2
 
 
 def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> None:

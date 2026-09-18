@@ -53,6 +53,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rgb-heads", type=int, default=8)
     parser.add_argument("--rgb-dropout", type=float, default=0.1)
     parser.add_argument("--checkpoint-every", type=int, default=20)
+    parser.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=7,
+        help="Stop after this many validation epochs without loss improvement; zero disables.",
+    )
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -432,6 +439,7 @@ def _checkpoint_payload(
     epoch: int,
     next_batch: int,
     best_validation_loss: float,
+    early_stopping_bad_epochs: int,
     history: list[dict[str, Any]],
     metadata: dict[str, Any],
 ) -> dict[str, Any]:
@@ -441,9 +449,25 @@ def _checkpoint_payload(
         "epoch": epoch,
         "next_batch": next_batch,
         "best_validation_loss": best_validation_loss,
+        "early_stopping_bad_epochs": early_stopping_bad_epochs,
         "history": history,
         "metadata": metadata,
     }
+
+
+def _trailing_non_improving_epochs(
+    history: list[dict[str, Any]], min_delta: float
+) -> int:
+    best = float("inf")
+    bad_epochs = 0
+    for item in history:
+        validation_loss = float(item["validation_loss"])
+        if validation_loss < best - min_delta:
+            best = validation_loss
+            bad_epochs = 0
+        else:
+            bad_epochs += 1
+    return bad_epochs
 
 
 def _run_epoch(
@@ -593,6 +617,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise RuntimeError("This research demo is intentionally fixed to 50 classes.")
     if args.epochs < 1 or args.batch_size < 1:
         raise ValueError("epochs and batch-size must be positive.")
+    if args.early_stopping_patience < 0 or args.early_stopping_min_delta < 0:
+        raise ValueError("Early-stopping patience and min-delta must be non-negative.")
 
     # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
     # Transformers probe those optional backends can import a JAX build that is
@@ -768,6 +794,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     start_epoch = 0
     start_batch = 0
     best_validation_loss = float("inf")
+    early_stopping_bad_epochs = 0
+    stopped_early = False
     history: list[dict[str, Any]] = []
     if args.resume and last_checkpoint.is_file():
         checkpoint = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
@@ -779,8 +807,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         start_batch = int(checkpoint.get("next_batch", 0))
         best_validation_loss = float(checkpoint["best_validation_loss"])
         history = list(checkpoint.get("history", ()))
+        early_stopping_bad_epochs = int(
+            checkpoint.get(
+                "early_stopping_bad_epochs",
+                _trailing_non_improving_epochs(history, args.early_stopping_min_delta),
+            )
+        )
         print(
-            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; history={len(history)} epochs",
+            f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; "
+            f"history={len(history)} epochs; early-stop wait={early_stopping_bad_epochs}/"
+            f"{args.early_stopping_patience}",
             flush=True,
         )
 
@@ -795,6 +831,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             next_batch: int,
             current_epoch: int = epoch,
             current_best: float = best_validation_loss,
+            current_bad_epochs: int = early_stopping_bad_epochs,
         ) -> None:
             payload = _checkpoint_payload(
                 model,
@@ -802,6 +839,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 epoch=current_epoch,
                 next_batch=next_batch,
                 best_validation_loss=current_best,
+                early_stopping_bad_epochs=current_bad_epochs,
                 history=history,
                 metadata=metadata,
             )
@@ -861,10 +899,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             "validation_top1": validation_metrics["top1_accuracy"],
             "validation_samples": int(validation_metrics["samples"]),
         }
-        history.append(record)
-        improved = validation_metrics["loss"] < best_validation_loss
+        improved = (
+            validation_metrics["loss"]
+            < best_validation_loss - args.early_stopping_min_delta
+        )
         if improved:
             best_validation_loss = validation_metrics["loss"]
+            early_stopping_bad_epochs = 0
+        else:
+            early_stopping_bad_epochs += 1
+        record["improved"] = improved
+        record["early_stopping_bad_epochs"] = early_stopping_bad_epochs
+        history.append(record)
+        if improved:
             _save_torch_atomic(
                 torch,
                 best_checkpoint,
@@ -874,6 +921,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     epoch=epoch + 1,
                     next_batch=0,
                     best_validation_loss=best_validation_loss,
+                    early_stopping_bad_epochs=early_stopping_bad_epochs,
                     history=history,
                     metadata=metadata,
                 ),
@@ -887,6 +935,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 epoch=epoch + 1,
                 next_batch=0,
                 best_validation_loss=best_validation_loss,
+                early_stopping_bad_epochs=early_stopping_bad_epochs,
                 history=history,
                 metadata=metadata,
             ),
@@ -895,10 +944,24 @@ def main(argv: Sequence[str] | None = None) -> int:
         _plot_history(plt, history, output_root / "training_curves.png", args.classes)
         print(
             f"[epoch {epoch + 1}] train top1={record['train_top1']:.3f}; "
-            f"validation top1={record['validation_top1']:.3f}; best={improved}",
+            f"validation top1={record['validation_top1']:.3f}; best={improved}; "
+            f"early-stop wait={early_stopping_bad_epochs}/{args.early_stopping_patience}",
             flush=True,
         )
         start_batch = 0
+        if (
+            args.early_stopping_patience > 0
+            and early_stopping_bad_epochs >= args.early_stopping_patience
+        ):
+            stopped_early = True
+            print(
+                f"EARLY STOP at epoch {epoch + 1}: validation loss did not improve by "
+                f"at least {args.early_stopping_min_delta:g} for "
+                f"{early_stopping_bad_epochs} consecutive epochs. "
+                f"Restoring best checkpoint.",
+                flush=True,
+            )
+            break
 
     if not best_checkpoint.is_file():
         raise RuntimeError("No best checkpoint was created.")
@@ -956,6 +1019,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         "trainable_parameters": trainable,
         "requested_epochs": args.epochs,
         "completed_epochs": len(history),
+        "best_epoch": int(best["epoch"]),
+        "best_validation_loss": float(best["best_validation_loss"]),
+        "early_stopping": {
+            "patience": args.early_stopping_patience,
+            "min_delta": args.early_stopping_min_delta,
+            "triggered": stopped_early,
+            "stopped_epoch": int(history[-1]["epoch"]) if stopped_early else None,
+        },
         "max_train_batches_per_epoch": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
         "history": history,

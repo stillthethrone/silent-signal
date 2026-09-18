@@ -51,6 +51,10 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "from transformers import PreTrainedModel" in source
     assert "Import check PASS" in source
     assert "CHECKPOINT_EVERY" in source
+    assert "EARLY_STOPPING_PATIENCE = 7" in source
+    assert "EARLY_STOPPING_MIN_DELTA = 0.0" in source
+    assert "--early-stopping-patience" in source
+    assert "best_checkpoint.pt" in source
     assert "RESUME = True" in source
     assert "RUN_TEST = False" in source
     assert "PERSIST_VIDEO_CACHE = True" in source
