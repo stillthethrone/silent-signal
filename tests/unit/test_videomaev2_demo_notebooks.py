@@ -8,6 +8,7 @@ _ROOT = Path(__file__).parents[2]
 _TRAIN_NOTEBOOK = _ROOT / "notebooks/07_asl_citizen_top30_videomaev2_rgb_transformer_baseline.ipynb"
 _ANALYSIS_NOTEBOOK = _ROOT / "notebooks/08_asl_citizen_top30_videomaev2_error_analysis.ipynb"
 _DUAL_NOTEBOOK = _ROOT / "notebooks/09_asl_citizen_top50_dual_stream_demo.ipynb"
+_DUAL_ANALYSIS_NOTEBOOK = _ROOT / "notebooks/10_asl_citizen_top50_dual_stream_error_analysis.ipynb"
 
 
 def _source(path: Path) -> tuple[dict[str, object], str]:
@@ -123,3 +124,13 @@ def test_dual_stream_notebook_can_train_while_baseline_is_still_training() -> No
     assert "BASELINE_REPORT" not in source
     assert "'--baseline-report'" not in source
     assert "có thể chạy song song" in source
+
+
+def test_dual_analysis_can_target_the_old_official_compact64_run() -> None:
+    notebook, source = _source(_DUAL_ANALYSIS_NOTEBOOK)
+    _assert_clean(notebook)
+    assert "videomaev2_rgb_transformer_demo50_e50_compact_v1" in source
+    assert "videomaev2_graph_spatial_temporal_crossattn_demo50_compact64_v1" in source
+    assert "model_config.get('rgb_embedding_dim') != 64" in source
+    assert "model_config.get('pose_embedding_dim') != 64" in source
+    assert "'official' not in str(training.get('split_policy', '')).lower()" in source
