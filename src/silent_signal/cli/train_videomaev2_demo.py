@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--learning-rate", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
+    parser.add_argument("--label-smoothing", type=float, default=0.1)
     parser.add_argument(
         "--max-train-batches",
         type=int,
@@ -51,7 +52,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--rgb-embedding-dim", type=int, default=256)
     parser.add_argument("--rgb-layers", type=int, default=2)
     parser.add_argument("--rgb-heads", type=int, default=8)
-    parser.add_argument("--rgb-dropout", type=float, default=0.1)
+    parser.add_argument("--rgb-dropout", type=float, default=0.3)
+    parser.add_argument(
+        "--random-crop-scale-min",
+        type=float,
+        default=0.85,
+        help="Smallest square crop scale for training; validation always uses a center crop.",
+    )
+    parser.add_argument(
+        "--color-jitter",
+        type=float,
+        default=0.1,
+        help="Per-video brightness/contrast jitter strength for training; zero disables.",
+    )
+    parser.add_argument("--gradient-clip-norm", type=float, default=1.0)
     parser.add_argument("--checkpoint-every", type=int, default=20)
     parser.add_argument(
         "--early-stopping-patience",
@@ -236,12 +250,16 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
             frames: int = 16,
             size: int = 224,
             training: bool = False,
+            random_crop_scale_min: float = 1.0,
+            color_jitter: float = 0.0,
         ) -> None:
             self.rows = rows
             self.dataset_root = dataset_root
             self.frames = frames
             self.size = size
             self.training = training
+            self.random_crop_scale_min = random_crop_scale_min
+            self.color_jitter = color_jitter
 
         def __len__(self) -> int:
             return len(self.rows)
@@ -277,6 +295,13 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                     for i in range(self.frames)
                 ]
             target_set = set(targets)
+            crop_scale = (
+                float(np.random.uniform(self.random_crop_scale_min, 1.0))
+                if self.training
+                else 1.0
+            )
+            crop_y = float(np.random.uniform()) if self.training else 0.5
+            crop_x = float(np.random.uniform()) if self.training else 0.5
             decoded: dict[int, Any] = {}
             position = 0
             while position <= targets[-1]:
@@ -284,7 +309,12 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                 if not ok:
                     break
                 if position in target_set:
-                    decoded[position] = self._resize_crop(frame)
+                    decoded[position] = self._resize_crop(
+                        frame,
+                        crop_scale=crop_scale,
+                        crop_y=crop_y,
+                        crop_x=crop_x,
+                    )
                 position += 1
             capture.release()
             if not decoded:
@@ -294,21 +324,37 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                 decoded[min(available, key=lambda value: abs(value - target))] for target in targets
             ]
             array = np.stack(frames).astype("float32") / 255.0
+            if self.training and self.color_jitter > 0:
+                brightness = float(
+                    np.random.uniform(1.0 - self.color_jitter, 1.0 + self.color_jitter)
+                )
+                contrast = float(
+                    np.random.uniform(1.0 - self.color_jitter, 1.0 + self.color_jitter)
+                )
+                array = (array - 0.5) * contrast + 0.5
+                array = np.clip(array * brightness, 0.0, 1.0)
             array = (array - 0.5) / 0.5
             return torch.from_numpy(array).permute(3, 0, 1, 2).contiguous()
 
-        def _resize_crop(self, bgr: Any):
+        def _resize_crop(
+            self,
+            bgr: Any,
+            *,
+            crop_scale: float,
+            crop_y: float,
+            crop_x: float,
+        ):
             rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
             height, width = rgb.shape[:2]
-            scale = self.size / min(height, width)
-            resized = cv2.resize(
-                rgb,
-                (round(width * scale), round(height * scale)),
+            crop_size = max(2, round(min(height, width) * crop_scale))
+            top = round(max(0, height - crop_size) * crop_y)
+            left = round(max(0, width - crop_size) * crop_x)
+            cropped = rgb[top : top + crop_size, left : left + crop_size]
+            return cv2.resize(
+                cropped,
+                (self.size, self.size),
                 interpolation=cv2.INTER_LINEAR,
             )
-            top = max(0, (resized.shape[0] - self.size) // 2)
-            left = max(0, (resized.shape[1] - self.size) // 2)
-            return resized[top : top + self.size, left : left + self.size]
 
     return VideoDataset
 
@@ -486,6 +532,7 @@ def _run_epoch(
     start_batch: int = 0,
     checkpoint_every: int = 0,
     checkpoint_callback: Any | None = None,
+    gradient_clip_norm: float = 0.0,
 ) -> tuple[dict[str, float], list[dict[str, Any]]]:
     training = optimizer is not None
     model.train(training)
@@ -512,6 +559,12 @@ def _run_epoch(
                 loss = criterion(logits, labels)
             if training:
                 scaler.scale(loss).backward()
+                if gradient_clip_norm > 0:
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(
+                        (parameter for parameter in model.parameters() if parameter.requires_grad),
+                        gradient_clip_norm,
+                    )
                 scaler.step(optimizer)
                 scaler.update()
         batch_size = labels.numel()
@@ -619,6 +672,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("epochs and batch-size must be positive.")
     if args.early_stopping_patience < 0 or args.early_stopping_min_delta < 0:
         raise ValueError("Early-stopping patience and min-delta must be non-negative.")
+    if not 0 <= args.label_smoothing < 1:
+        raise ValueError("label-smoothing must be in [0, 1).")
+    if not 0 < args.random_crop_scale_min <= 1:
+        raise ValueError("random-crop-scale-min must be in (0, 1].")
+    if not 0 <= args.color_jitter < 1:
+        raise ValueError("color-jitter must be in [0, 1).")
+    if args.gradient_clip_norm < 0:
+        raise ValueError("gradient-clip-norm must be non-negative.")
 
     # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
     # Transformers probe those optional backends can import a JAX build that is
@@ -767,7 +828,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         lr=args.learning_rate,
         weight_decay=args.weight_decay,
     )
-    criterion = torch.nn.CrossEntropyLoss()
+    criterion = torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
     scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
     VideoDataset = _make_dataset_class(torch, cv2, np)
     last_checkpoint = output_root / "last_checkpoint.pt"
@@ -788,6 +849,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "batch_size": args.batch_size,
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
+        "label_smoothing": args.label_smoothing,
+        "random_crop_scale_min": args.random_crop_scale_min,
+        "color_jitter": args.color_jitter,
+        "gradient_clip_norm": args.gradient_clip_norm,
         "max_train_batches": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
     }
@@ -824,7 +889,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     for epoch in range(start_epoch, args.epochs):
         maximum_train = args.max_train_batches * args.batch_size
         epoch_rows = _balanced_cap(split_rows["train"], maximum_train, args.seed + epoch)
-        train_dataset = VideoDataset(epoch_rows, args.dataset_root, training=True)
+        train_dataset = VideoDataset(
+            epoch_rows,
+            args.dataset_root,
+            training=True,
+            random_crop_scale_min=args.random_crop_scale_min,
+            color_jitter=args.color_jitter,
+        )
         train_loader = _loader(torch, train_dataset, args.batch_size, args.num_workers)
 
         def save_progress(
@@ -864,6 +935,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             start_batch=start_batch if epoch == start_epoch else 0,
             checkpoint_every=args.checkpoint_every,
             checkpoint_callback=save_progress,
+            gradient_clip_norm=args.gradient_clip_norm,
         )
         validation_rows = _balanced_cap(
             split_rows["validation"],

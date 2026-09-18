@@ -51,8 +51,14 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "from transformers import PreTrainedModel" in source
     assert "Import check PASS" in source
     assert "CHECKPOINT_EVERY" in source
-    assert "EARLY_STOPPING_PATIENCE = 7" in source
-    assert "EARLY_STOPPING_MIN_DELTA = 0.0" in source
+    assert "EARLY_STOPPING_PATIENCE = 5" in source
+    assert "EARLY_STOPPING_MIN_DELTA = 0.005" in source
+    assert "RGB_DROPOUT = 0.3" in source
+    assert "LABEL_SMOOTHING = 0.1" in source
+    assert "WEIGHT_DECAY = 0.01" in source
+    assert "RANDOM_CROP_SCALE_MIN = 0.85" in source
+    assert "COLOR_JITTER = 0.1" in source
+    assert "GRADIENT_CLIP_NORM = 1.0" in source
     assert "--early-stopping-patience" in source
     assert "best_checkpoint.pt" in source
     assert "RESUME = True" in source
@@ -60,7 +66,7 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "PERSIST_VIDEO_CACHE = True" in source
     assert "datasets/asl_citizen_top30" in source
     assert "tái sử dụng cache top-30" in source
-    assert "videomaev2_rgb_transformer_demo50_e50" in source
+    assert "videomaev2_rgb_transformer_demo50_e50_regularized_v1" in source
     assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
@@ -70,7 +76,7 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     notebook, source = _source(_ANALYSIS_NOTEBOOK)
     _assert_clean(notebook)
     assert "ANALYSIS_SPLIT = 'validation'" in source
-    assert "videomaev2_rgb_transformer_demo50_e50" in source
+    assert "videomaev2_rgb_transformer_demo50_e50_regularized_v1" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
     assert "silent_signal.cli.analyze_videomaev2_demo" in source
     assert "confusion_matrices.png" in source
@@ -78,3 +84,6 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "top_confusions.png" in source
     assert "confidence_histogram.png" in source
     assert "selected_50_official_split_counts.png" in source
+    assert "training_curves.png" in source
+    assert "generalization" in source
+    assert "class_support" in source

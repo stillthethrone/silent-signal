@@ -9,6 +9,7 @@ from silent_signal.cli.train_videomaev2_demo import (
     _balanced_cap,
     _select_demo_rows,
     _trailing_non_improving_epochs,
+    build_parser,
 )
 
 _ROOT = Path(__file__).parents[2]
@@ -105,6 +106,29 @@ def test_early_stopping_min_delta_rejects_tiny_improvements() -> None:
     assert _trailing_non_improving_epochs(history, min_delta=0.001) == 2
 
 
+def test_regularized_baseline_defaults_are_conservative() -> None:
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "--manifest",
+            "manifest.csv",
+            "--selection-report",
+            "selection.json",
+            "--dataset-root",
+            "dataset",
+            "--output-root",
+            "output",
+        ]
+    )
+
+    assert args.rgb_dropout == 0.3
+    assert args.label_smoothing == 0.1
+    assert args.weight_decay == 0.01
+    assert args.random_crop_scale_min == 0.85
+    assert args.color_jitter == 0.1
+    assert args.gradient_clip_norm == 1.0
+
+
 def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> None:
     source = _TRAINER.read_text(encoding="utf-8")
 
@@ -117,5 +141,9 @@ def test_trainer_freezes_videomae_and_trains_a_separate_rgb_transformer() -> Non
     assert "torch.nn.TransformerEncoder(" in source
     assert "self.rgb_transformer(tokens)" in source
     assert "self.classifier(feature)" in source
+    assert "CrossEntropyLoss(label_smoothing=args.label_smoothing)" in source
+    assert "clip_grad_norm_" in source
+    assert "random_crop_scale_min" in source
+    assert "color_jitter" in source
     assert 'manifest_root / f"{split}.csv"' in source
     assert 'default=0,\n        help="Zero uses every official training clip."' in source

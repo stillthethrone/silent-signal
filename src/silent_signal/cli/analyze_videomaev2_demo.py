@@ -212,6 +212,55 @@ def main(argv: Sequence[str] | None = None) -> int:
     evaluation = baseline_report.get("evaluation", {}).get(args.split, {})
     accuracy = float((y_true == y_pred).mean())
     lowest_recall = per_class.sort_values(["recall", "support"]).head(5).to_dict("records")
+    history = list(baseline_report.get("history", ()))
+    best_epoch = int(baseline_report.get("best_epoch", 0))
+    best_record = next(
+        (item for item in history if int(item.get("epoch", -1)) == best_epoch),
+        None,
+    )
+    final_record = history[-1] if history else None
+
+    def gap_payload(record: dict[str, Any] | None) -> dict[str, Any] | None:
+        if record is None:
+            return None
+        train_top1 = float(record["train_top1"])
+        validation_top1 = float(record["validation_top1"])
+        return {
+            "epoch": int(record["epoch"]),
+            "train_top1": train_top1,
+            "validation_top1": validation_top1,
+            "top1_generalization_gap": train_top1 - validation_top1,
+            "train_loss": float(record["train_loss"]),
+            "validation_loss": float(record["validation_loss"]),
+        }
+
+    support_values = per_class["support"].astype(int)
+    train_counts = np.asarray(
+        [int(item["counts"]["train"]) for item in classes], dtype=int
+    )
+    high_confidence_errors = int(
+        ((~predictions["correct"]) & (predictions["confidence"] >= 0.8)).sum()
+    )
+    generalization = {
+        "best_checkpoint": gap_payload(best_record),
+        "last_trained_epoch": gap_payload(final_record),
+        "overfit_warning": bool(
+            best_record is not None
+            and float(best_record["train_top1"])
+            - float(best_record["validation_top1"])
+            >= 0.2
+        ),
+    }
+    class_support = {
+        "train_min": int(train_counts.min()),
+        "train_median": float(np.median(train_counts)),
+        "train_max": int(train_counts.max()),
+        "train_max_to_min_ratio": float(train_counts.max() / max(train_counts.min(), 1)),
+        "analysis_min": int(support_values.min()),
+        "analysis_median": float(support_values.median()),
+        "analysis_max": int(support_values.max()),
+        "analysis_classes_below_5": int((support_values < 5).sum()),
+    }
     report = {
         "schema_version": 1,
         "created_utc": datetime.now(UTC).isoformat(),
@@ -229,6 +278,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "macro_precision": metrics["macro avg"]["precision"],
         "macro_recall": metrics["macro avg"]["recall"],
         "macro_f1": metrics["macro avg"]["f1-score"],
+        "generalization": generalization,
+        "class_support": class_support,
+        "high_confidence_errors_at_0_8": high_confidence_errors,
         "lowest_recall_classes": lowest_recall,
         "top_confusions": top_pairs,
         "artifacts": {
@@ -245,6 +297,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(
         f"[{args.split}] top1={accuracy:.3f}; macro-F1={report['macro_f1']:.3f}; "
         f"samples={len(predictions)}/{evaluation.get('available_samples', '?')}",
+        flush=True,
+    )
+    if generalization["best_checkpoint"] is not None:
+        item = generalization["best_checkpoint"]
+        print(
+            f"Best epoch {item['epoch']}: train top1={item['train_top1']:.3f}; "
+            f"validation top1={item['validation_top1']:.3f}; "
+            f"gap={item['top1_generalization_gap']:.3f}; "
+            f"overfit_warning={generalization['overfit_warning']}",
+            flush=True,
+        )
+    print(
+        "Class support: "
+        f"train min/median/max={class_support['train_min']}/"
+        f"{class_support['train_median']:.1f}/{class_support['train_max']}; "
+        f"{args.split} classes below 5 clips={class_support['analysis_classes_below_5']}",
         flush=True,
     )
     print("\nCác lớp recall thấp nhất:", flush=True)
