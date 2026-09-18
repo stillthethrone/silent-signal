@@ -51,6 +51,11 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "USE_TF'] = '0'" in source
     assert "from transformers import PreTrainedModel" in source
     assert "Import check PASS" in source
+    assert "PROJECT_SRC = str(PROJECT_ROOT / 'src')" in source
+    assert source.index("PROJECT_SRC = str(PROJECT_ROOT / 'src')") < source.index(
+        "from silent_signal.cli.train_videomaev2_demo import _resplit_demo_rows"
+    )
+    assert "Project import PASS" in source
     assert "CHECKPOINT_EVERY" in source
     assert "EARLY_STOPPING_PATIENCE = 5" in source
     assert "EARLY_STOPPING_MIN_DELTA = 0.005" in source
