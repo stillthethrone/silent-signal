@@ -33,11 +33,11 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "feat/asl-citizen-videomaev2-demo-baseline" in source
     assert "OpenGVLab/VideoMAEv2-Base" in source
     assert "CLASS_COUNT = 50" in source
-    assert "MAX_EPOCHS = 40" in source
+    assert "MAX_EPOCHS = 100" in source
     assert "classes = eligible[:CLASS_COUNT]" in source
     assert "SignFrequency(M)" in source
     assert "train', 'validation', 'test" in source
-    assert "Split isolation: PASS" in source
+    assert "Official split isolation: PASS" in source
     assert "train_test_split" not in source
     assert "MAX_TRAIN_BATCHES" in source
     assert "MAX_EVAL_BATCHES" in source
@@ -53,12 +53,12 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "Import check PASS" in source
     assert "PROJECT_SRC = str(PROJECT_ROOT / 'src')" in source
     assert source.index("PROJECT_SRC = str(PROJECT_ROOT / 'src')") < source.index(
-        "from silent_signal.cli.train_videomaev2_demo import _resplit_demo_rows"
+        "import silent_signal, torch"
     )
     assert "Project import PASS" in source
     assert "CHECKPOINT_EVERY" in source
-    assert "EARLY_STOPPING_PATIENCE = 5" in source
-    assert "EARLY_STOPPING_MIN_DELTA = 0.005" in source
+    assert "EARLY_STOPPING_PATIENCE = 10" in source
+    assert "EARLY_STOPPING_MIN_DELTA = 0.001" in source
     assert "RGB_DROPOUT = 0.5" in source
     assert "LABEL_SMOOTHING = 0.15" in source
     assert "WEIGHT_DECAY = 0.04" in source
@@ -67,18 +67,15 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "GRADIENT_CLIP_NORM = 1.0" in source
     assert "--early-stopping-patience" in source
     assert "best_checkpoint.pt" in source
-    assert "Macro-F1 = trung bình F1 của từng từ" in source
+    assert "Macro-F1 is the unweighted mean of per-word F1 scores" in source
     assert "RESUME = False" in source
-    assert "RUN_TEST = False" in source
-    assert "CUSTOM_SIGNER_SPLIT = True" in source
-    assert "TRAIN_RATIO = 0.65" in source
-    assert "VALIDATION_RATIO = 0.25" in source
-    assert "TEST_RATIO = 0.10" in source
-    assert "--resplit-by-signer" in source
+    assert "RUN_TEST = True" in source
+    assert "CUSTOM_SIGNER_SPLIT" not in source
+    assert "--resplit-by-signer" not in source
     assert "PERSIST_VIDEO_CACHE = True" in source
     assert "datasets/asl_citizen_top30" in source
-    assert "tái sử dụng cache top-30" in source
-    assert "videomaev2_rgb_transformer_demo50_split65_25_10_compact64_v1" in source
+    assert "reuses the existing cache" in source
+    assert "videomaev2_rgb_transformer_demo50_official_compact64_v1" in source
     assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
