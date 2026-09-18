@@ -78,6 +78,11 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "ANALYSIS_SPLIT = 'validation'" in source
     assert "videomaev2_rgb_transformer_demo50_e50_regularized_v1" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
+    assert "drive_ready" in source
+    assert "force_remount=True" in source
+    assert "timeout_ms=120_000" in source
+    assert "Environment PASS" in source
+    assert "Analysis packages already compatible; skip reinstall." in source
     assert "silent_signal.cli.analyze_videomaev2_demo" in source
     assert "confusion_matrices.png" in source
     assert "per_class_metrics.png" in source
