@@ -93,5 +93,11 @@ def test_analysis_cli_completes_for_all_fifty_classes(tmp_path: Path) -> None:
     )
     payload = json.loads((tmp_path / "validation_error_analysis.json").read_text(encoding="utf-8"))
     assert payload["top1_accuracy"] == 0.5
+    assert payload["macro_precision"] == pytest.approx(0.5)
+    assert payload["macro_recall"] == pytest.approx(0.5)
+    assert payload["macro_f1"] == pytest.approx(0.5)
+    assert payload["weighted_precision"] == pytest.approx(0.5)
+    assert payload["weighted_recall"] == pytest.approx(0.5)
+    assert payload["weighted_f1"] == pytest.approx(0.5)
     assert payload["generalization"]["best_checkpoint"]["epoch"] == 2
     assert payload["class_support"]["analysis_classes_below_5"] == 50
