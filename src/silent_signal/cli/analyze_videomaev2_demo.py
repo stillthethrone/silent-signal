@@ -123,9 +123,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         xlabel="Predicted",
         ylabel="True",
     )
+    tick_positions = np.arange(len(labels)) + 0.5
     for axis in axes:
-        axis.set_xticklabels(labels, rotation=75, ha="right")
-        axis.set_yticklabels(labels, rotation=0)
+        axis.set_xticks(tick_positions, labels, rotation=75, ha="right")
+        axis.set_yticks(tick_positions, labels, rotation=0)
     figure.suptitle("VideoMAE V2 + RGB Transformer demo (50 classes; not final benchmark)")
     figure.tight_layout()
     confusion_path = baseline_root / f"{args.split}_confusion_matrices.png"
