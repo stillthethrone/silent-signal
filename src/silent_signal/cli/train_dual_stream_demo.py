@@ -194,6 +194,11 @@ def _run_epoch(
     total_samples = 0
     predictions: list[dict[str, Any]] = []
     started = time.perf_counter()
+    print(
+        f"[{phase}] epoch {epoch + 1}/{epochs} START | batches={total_batches} | "
+        f"resume_batch={start_batch} | device={device}",
+        flush=True,
+    )
     for batch_index, batch in enumerate(loader):
         if batch_index < start_batch:
             continue
@@ -516,7 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         weight_decay=args.weight_decay,
     )
     criterion = torch.nn.CrossEntropyLoss(label_smoothing=args.label_smoothing)
-    scaler = torch.cuda.amp.GradScaler(enabled=device.type == "cuda")
+    scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     last_checkpoint = output_root / "last_checkpoint.pt"
