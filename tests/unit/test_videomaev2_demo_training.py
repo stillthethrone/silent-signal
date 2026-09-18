@@ -119,8 +119,7 @@ def test_macro_f1_gives_each_class_equal_weight() -> None:
 
 def test_macro_f1_is_one_when_every_class_is_correct() -> None:
     predictions = [
-        {"true_class": class_index, "pred_class": class_index}
-        for class_index in range(50)
+        {"true_class": class_index, "pred_class": class_index} for class_index in range(50)
     ]
 
     assert _macro_f1_from_predictions(predictions, class_count=50) == 1.0

@@ -241,16 +241,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 {
                     "train_macro_f1": train_macro_f1,
                     "validation_macro_f1": validation_macro_f1,
-                    "macro_f1_generalization_gap": train_macro_f1
-                    - validation_macro_f1,
+                    "macro_f1_generalization_gap": train_macro_f1 - validation_macro_f1,
                 }
             )
         return payload
 
     support_values = per_class["support"].astype(int)
-    train_counts = np.asarray(
-        [int(item["counts"]["train"]) for item in classes], dtype=int
-    )
+    train_counts = np.asarray([int(item["counts"]["train"]) for item in classes], dtype=int)
     high_confidence_errors = int(
         ((~predictions["correct"]) & (predictions["confidence"] >= 0.8)).sum()
     )
@@ -259,9 +256,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "last_trained_epoch": gap_payload(final_record),
         "overfit_warning": bool(
             best_record is not None
-            and float(best_record["train_top1"])
-            - float(best_record["validation_top1"])
-            >= 0.2
+            and float(best_record["train_top1"]) - float(best_record["validation_top1"]) >= 0.2
         ),
     }
     class_support = {

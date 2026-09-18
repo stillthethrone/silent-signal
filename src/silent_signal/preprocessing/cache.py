@@ -103,12 +103,8 @@ def read_graph_pose_cache(
                 joint_mask=archive["joint_mask"].astype(np.bool_, copy=False),
                 observed_mask=archive["observed_mask"].astype(np.bool_, copy=False),
                 frame_mask=archive["frame_mask"].astype(np.bool_, copy=False),
-                source_frame_indices=archive["source_frame_indices"].astype(
-                    np.int64, copy=False
-                ),
-                timestamps_seconds=archive["timestamps_seconds"].astype(
-                    np.float64, copy=False
-                ),
+                source_frame_indices=archive["source_frame_indices"].astype(np.int64, copy=False),
+                timestamps_seconds=archive["timestamps_seconds"].astype(np.float64, copy=False),
                 adjacency=archive["adjacency"].astype(np.float32, copy=False),
                 metadata=dict(envelope.get("metadata", {})),
             )

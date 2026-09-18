@@ -44,9 +44,7 @@ class SpatialGraphBlock(nn.Module):
 
     def forward(self, features: Tensor, adjacency: Tensor, joint_mask: Tensor) -> Tensor:
         mask = joint_mask.unsqueeze(-1).to(dtype=features.dtype)
-        features = features + self.graph_dropout(
-            self.graph(self.graph_norm(features), adjacency)
-        )
+        features = features + self.graph_dropout(self.graph(self.graph_norm(features), adjacency))
         features = features * mask
         features = features + self.mlp(self.mlp_norm(features))
         return features * mask

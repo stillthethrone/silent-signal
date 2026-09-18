@@ -61,9 +61,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         _log("setup", f"hashing manifest: {manifest_path}")
         manifest_sha256 = sha256_file(manifest_path)
         if manifest_sha256 != experiment.manifest_sha256:
-            raise ValueError(
-                "Manifest SHA-256 does not match the graph encoder experiment config."
-            )
+            raise ValueError("Manifest SHA-256 does not match the graph encoder experiment config.")
         _log("setup", "reading official manifest and selecting train samples")
         records = tuple(
             sorted(
@@ -85,8 +83,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         device = _resolve_device(args.device)
         _log(
             "setup",
-            f"selected={len(dataset)} batch_size={batch_size} steps={train_steps} "
-            f"device={device}",
+            f"selected={len(dataset)} batch_size={batch_size} steps={train_steps} device={device}",
         )
         result = _run_smoke_training(
             dataset,

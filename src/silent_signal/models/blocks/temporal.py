@@ -28,9 +28,7 @@ class TemporalConvBlock(nn.Module):
         batch, frames, joints, channels = features.shape
         residual = features
         normalized = self.norm(features)
-        temporal = normalized.permute(0, 2, 3, 1).reshape(
-            batch * joints, channels, frames
-        )
+        temporal = normalized.permute(0, 2, 3, 1).reshape(batch * joints, channels, frames)
         temporal = self.pointwise(self.activation(self.depthwise(temporal)))
         temporal = temporal.reshape(batch, joints, channels, frames).permute(0, 3, 1, 2)
         mask = joint_mask.unsqueeze(-1).to(dtype=features.dtype)

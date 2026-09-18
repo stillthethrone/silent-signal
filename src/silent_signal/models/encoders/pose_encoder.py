@@ -69,9 +69,7 @@ class PoseGraphEncoder(nn.Module):
         encoded = self.input_projection(features)
         encoded = encoded + self.joint_embedding + self.time_embedding[:, :frames]
         encoded = self.input_dropout(encoded) * mask
-        for spatial, temporal in zip(
-            self.spatial_blocks, self.temporal_blocks, strict=True
-        ):
+        for spatial, temporal in zip(self.spatial_blocks, self.temporal_blocks, strict=True):
             encoded = spatial(encoded, adjacency, joint_mask)
             encoded = temporal(encoded, joint_mask)
 

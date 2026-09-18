@@ -116,11 +116,7 @@ def prepare_graph_pose(
     layout = get_pose_layout(config.layout_name)
     xy, scores = layout.select(sequence.keypoints_xy, sequence.keypoint_scores)
     finite = np.isfinite(xy).all(axis=-1) & np.isfinite(scores)
-    observed = (
-        sequence.person_detected[:, None]
-        & finite
-        & (scores >= config.confidence_threshold)
-    )
+    observed = sequence.person_detected[:, None] & finite & (scores >= config.confidence_threshold)
     xy, scores, usable = interpolate_short_gaps(
         xy,
         scores,

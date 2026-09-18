@@ -296,9 +296,7 @@ def _make_dataset_class(torch: Any, cv2: Any, np: Any):
                 ]
             target_set = set(targets)
             crop_scale = (
-                float(np.random.uniform(self.random_crop_scale_min, 1.0))
-                if self.training
-                else 1.0
+                float(np.random.uniform(self.random_crop_scale_min, 1.0)) if self.training else 1.0
             )
             crop_y = float(np.random.uniform()) if self.training else 0.5
             crop_x = float(np.random.uniform()) if self.training else 0.5
@@ -501,9 +499,7 @@ def _checkpoint_payload(
     }
 
 
-def _trailing_non_improving_epochs(
-    history: list[dict[str, Any]], min_delta: float
-) -> int:
+def _trailing_non_improving_epochs(history: list[dict[str, Any]], min_delta: float) -> int:
     best = float("inf")
     bad_epochs = 0
     for item in history:
@@ -516,9 +512,7 @@ def _trailing_non_improving_epochs(
     return bad_epochs
 
 
-def _macro_f1_from_predictions(
-    predictions: list[dict[str, Any]], class_count: int
-) -> float:
+def _macro_f1_from_predictions(predictions: list[dict[str, Any]], class_count: int) -> float:
     """Return the unweighted mean of the per-class F1 scores.
 
     Classes with no true positives receive F1=0. Averaging over the complete
@@ -671,9 +665,7 @@ def _write_predictions(
     temporary.replace(path)
 
 
-def _plot_history(
-    plt: Any, history: list[dict[str, Any]], path: Path, class_count: int
-) -> None:
+def _plot_history(plt: Any, history: list[dict[str, Any]], path: Path, class_count: int) -> None:
     if not history:
         return
     epochs = [item["epoch"] for item in history]
@@ -685,9 +677,7 @@ def _plot_history(
     axes[0].set(title="Loss", xlabel="Epoch", ylabel="Cross entropy")
     axes[0].legend()
     axes[0].grid(alpha=0.3)
-    axes[1].plot(
-        epochs, [item["train_top1"] for item in history], marker="o", label="train top-1"
-    )
+    axes[1].plot(epochs, [item["train_top1"] for item in history], marker="o", label="train top-1")
     axes[1].plot(
         epochs,
         [item["validation_top1"] for item in history],
@@ -712,9 +702,7 @@ def _plot_history(
     axes[1].set(title="Top-1 and macro-F1", xlabel="Epoch", ylabel="Score", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
-    figure.suptitle(
-        f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo"
-    )
+    figure.suptitle(f"Frozen VideoMAE V2 + trainable RGB Transformer — {class_count}-class demo")
     figure.tight_layout()
     figure.savefig(path, dpi=160, bbox_inches="tight")
     plt.close(figure)
@@ -1031,10 +1019,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "validation_macro_f1": validation_metrics["macro_f1"],
             "validation_samples": int(validation_metrics["samples"]),
         }
-        improved = (
-            validation_metrics["loss"]
-            < best_validation_loss - args.early_stopping_min_delta
-        )
+        improved = validation_metrics["loss"] < best_validation_loss - args.early_stopping_min_delta
         if improved:
             best_validation_loss = validation_metrics["loss"]
             early_stopping_bad_epochs = 0
