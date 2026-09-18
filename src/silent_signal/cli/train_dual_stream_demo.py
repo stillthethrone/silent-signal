@@ -92,7 +92,7 @@ def _validate_selected_manifest(
     if missing:
         raise RuntimeError(f"Baseline manifest is missing columns: {sorted(missing)}")
     if {str(row["split"]) for row in rows} != {"train", "validation", "test"}:
-        raise RuntimeError("The selected manifest must preserve all three official splits.")
+        raise RuntimeError("The selected manifest must contain train, validation and test.")
     sample_ids = [str(row["sample_id"]) for row in rows]
     if len(sample_ids) != len(set(sample_ids)):
         raise RuntimeError("Duplicate sample_id in the selected baseline manifest.")
@@ -106,6 +106,17 @@ def _validate_selected_manifest(
         found = {int(row["class_index"]) for row in rows if row["split"] == split}
         if found != set(range(class_count)):
             raise RuntimeError(f"Split {split} does not contain every selected class.")
+    if all("signer_id" in row for row in rows):
+        signer_sets = {
+            split: {str(row["signer_id"]) for row in rows if row["split"] == split}
+            for split in ("train", "validation", "test")
+        }
+        if (
+            signer_sets["train"] & signer_sets["validation"]
+            or signer_sets["train"] & signer_sets["test"]
+            or signer_sets["validation"] & signer_sets["test"]
+        ):
+            raise RuntimeError("Signer leakage in the selected baseline manifest.")
     return gloss_by_class
 
 
@@ -151,7 +162,8 @@ def _make_dual_dataset_class(
             )
             if graph.class_index != int(row["source_class_index"]):
                 raise RuntimeError(f"Graph source class mismatch for {sample_id}.")
-            if graph.split != str(row["split"]):
+            expected_graph_split = str(row.get("source_split") or row["split"])
+            if graph.split != expected_graph_split:
                 raise RuntimeError(f"Graph split mismatch for {sample_id}.")
             return (
                 video,
@@ -822,7 +834,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
         "study_stage": "paired 50-class document-specified dual-stream improvement demo",
-        "split_policy": "same official split and same 50 samples/classes as RGB baseline",
+        "split_policy": (
+            str(selection.get("split_policy", "split policy inherited from RGB baseline"))
+            + "; same samples/classes and split assignment as RGB baseline"
+        ),
         "model": metadata,
         "device": str(device),
         "total_parameters": total_parameters,
