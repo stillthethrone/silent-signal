@@ -85,8 +85,10 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     notebook, source = _source(_ANALYSIS_NOTEBOOK)
     _assert_clean(notebook)
     assert "ANALYSIS_SPLIT = 'validation'" in source
-    assert "videomaev2_rgb_transformer_demo50_split65_25_10_compact64_v1" in source
+    assert "videomaev2_rgb_transformer_demo50_official_compact64_v1" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
+    assert "Artifact guard PASS: official split, RGB embedding=64" in source
+    assert "training_report.get('model', {}).get('rgb_embedding_dim') != 64" in source
     assert "drive_ready" in source
     assert "force_remount=True" in source
     assert "timeout_ms=120_000" in source
