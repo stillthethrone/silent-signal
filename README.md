@@ -120,6 +120,14 @@ to validate the mask-aware Graph-Spatial-Temporal Encoder, its 200-class head, b
 optimizer step and atomic smoke checkpoint. This check is not full multi-epoch training; see
 the [graph encoder contract](docs/graph_encoder.md).
 
+For the frozen 50-class pose-only study, use
+[09_asl_citizen_top50_graph_transformer_training.ipynb](notebooks/09_asl_citizen_top50_graph_transformer_training.ipynb).
+It preserves the official ASL Citizen split, reuses the completed top-200 raw pose caches,
+creates independent top-50 graph artifacts, and trains an explicit graph encoder followed by
+spatial and temporal Transformer stages. The trainer selects checkpoints with validation
+macro-F1 and evaluates test only after model selection. See the
+[top-50 graph Transformer protocol](docs/asl_citizen_top50_graph_transformer.md).
+
 The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
 files need roughly 89 GiB together, before extra working space or pose caches;
 check the actual Colab disk quota before downloading. See the notebook and

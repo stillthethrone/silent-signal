@@ -1,0 +1,44 @@
+schema_version: 1
+
+model:
+  architecture: graph_spatial_temporal_transformer_v1
+  input_dim: 7
+  num_nodes: 75
+  max_frames: 64
+  hidden_dim: 128
+  embedding_dim: 256
+  num_blocks: 2
+  temporal_kernel: 5
+  spatial_layers: 2
+  temporal_layers: 3
+  num_heads: 4
+  ffn_dim: 512
+  dropout: 0.15
+  num_classes: 50
+
+smoke:
+  batch_size: 8
+  train_steps: 5
+  sample_limit: 64
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  seed: 42
+
+training:
+  batch_size: 32
+  max_epochs: 100
+  learning_rate: 0.0003
+  weight_decay: 0.01
+  label_smoothing: 0.05
+  gradient_clip: 1.0
+  early_stopping_min_epochs: 10
+  early_stopping_patience: 10
+  early_stopping_min_delta: 0.001
+  num_workers: 0
+  seed: 42
+
+expected:
+  # The top-50 manifest is generated on Drive and its actual hash is recorded
+  # in every report/checkpoint. Replace "auto" with that hash to hard-pin a run.
+  manifest_sha256: auto
+  preprocessing_fingerprint: 9a4f48c1dbc9b7a7448978637d37879b12257d99cbc34063c4f52ee49c8b4e8b

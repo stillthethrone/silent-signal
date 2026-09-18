@@ -60,7 +60,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_path = args.manifest.resolve()
         _log("setup", f"hashing manifest: {manifest_path}")
         manifest_sha256 = sha256_file(manifest_path)
-        if manifest_sha256 != experiment.manifest_sha256:
+        if (
+            experiment.manifest_sha256 is not None
+            and manifest_sha256 != experiment.manifest_sha256
+        ):
             raise ValueError(
                 "Manifest SHA-256 does not match the graph encoder experiment config."
             )
@@ -318,7 +321,7 @@ def _log(stage: str, message: str) -> None:
 
 
 def _duration(seconds: float) -> str:
-    total = max(0, int(round(seconds)))
+    total = max(0, round(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"

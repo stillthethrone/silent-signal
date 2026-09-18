@@ -33,8 +33,10 @@ silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
 ss-select-asl-subset = "silent_signal.cli.select_subset:entrypoint"
+ss-select-asl-ranked-subset = "silent_signal.cli.select_ranked_subset:entrypoint"
 ss-prepare-pose-graph = "silent_signal.cli.prepare_graph:entrypoint"
 ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
+ss-train-graph-transformer = "silent_signal.cli.train_graph_transformer:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]
