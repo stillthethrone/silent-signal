@@ -82,10 +82,11 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "force_remount=True" in source
     assert "timeout_ms=120_000" in source
     assert "Environment PASS" in source
-    assert "silent-signal-analysis-venv" in source
+    assert "silent-signal-analysis-site-py313-v1" in source
     assert "numpy==2.2.2" in source
     assert "scipy==1.15.1" in source
     assert "--no-cache-dir" in source
+    assert "--target" in source
     assert "ANALYSIS_ENV['PYTHONPATH']" in source
     assert "pip', 'install', '-q', '-e'" not in source
     assert "silent_signal.cli.analyze_videomaev2_demo" in source
