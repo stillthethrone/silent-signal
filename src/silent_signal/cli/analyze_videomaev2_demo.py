@@ -226,7 +226,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return None
         train_top1 = float(record["train_top1"])
         validation_top1 = float(record["validation_top1"])
-        return {
+        payload = {
             "epoch": int(record["epoch"]),
             "train_top1": train_top1,
             "validation_top1": validation_top1,
@@ -234,6 +234,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             "train_loss": float(record["train_loss"]),
             "validation_loss": float(record["validation_loss"]),
         }
+        if "train_macro_f1" in record and "validation_macro_f1" in record:
+            train_macro_f1 = float(record["train_macro_f1"])
+            validation_macro_f1 = float(record["validation_macro_f1"])
+            payload.update(
+                {
+                    "train_macro_f1": train_macro_f1,
+                    "validation_macro_f1": validation_macro_f1,
+                    "macro_f1_generalization_gap": train_macro_f1
+                    - validation_macro_f1,
+                }
+            )
+        return payload
 
     support_values = per_class["support"].astype(int)
     train_counts = np.asarray(

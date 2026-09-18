@@ -61,6 +61,7 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "GRADIENT_CLIP_NORM = 1.0" in source
     assert "--early-stopping-patience" in source
     assert "best_checkpoint.pt" in source
+    assert "Macro-F1 = trung bình F1 của từng từ" in source
     assert "RESUME = True" in source
     assert "RUN_TEST = False" in source
     assert "PERSIST_VIDEO_CACHE = True" in source
@@ -98,3 +99,4 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     assert "training_curves.png" in source
     assert "generalization" in source
     assert "class_support" in source
+    assert "Macro-F1" in source

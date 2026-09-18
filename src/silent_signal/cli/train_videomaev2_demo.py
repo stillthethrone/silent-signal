@@ -516,6 +516,40 @@ def _trailing_non_improving_epochs(
     return bad_epochs
 
 
+def _macro_f1_from_predictions(
+    predictions: list[dict[str, Any]], class_count: int
+) -> float:
+    """Return the unweighted mean of the per-class F1 scores.
+
+    Classes with no true positives receive F1=0. Averaging over the complete
+    class list gives every gloss the same influence, regardless of how many
+    clips it contributes.
+    """
+    true_positives = [0] * class_count
+    false_positives = [0] * class_count
+    false_negatives = [0] * class_count
+    for item in predictions:
+        true_class = int(item["true_class"])
+        pred_class = int(item["pred_class"])
+        if true_class == pred_class:
+            true_positives[true_class] += 1
+        else:
+            false_negatives[true_class] += 1
+            false_positives[pred_class] += 1
+
+    per_class_f1 = []
+    for class_index in range(class_count):
+        denominator = (
+            2 * true_positives[class_index]
+            + false_positives[class_index]
+            + false_negatives[class_index]
+        )
+        per_class_f1.append(
+            0.0 if denominator == 0 else 2 * true_positives[class_index] / denominator
+        )
+    return sum(per_class_f1) / class_count
+
+
 def _run_epoch(
     *,
     torch: Any,
@@ -528,6 +562,7 @@ def _run_epoch(
     phase: str,
     epoch: int,
     epochs: int,
+    class_count: int,
     progress_every: int,
     start_batch: int = 0,
     checkpoint_every: int = 0,
@@ -608,6 +643,7 @@ def _run_epoch(
     return {
         "loss": total_loss / total_samples,
         "top1_accuracy": total_correct / total_samples,
+        "macro_f1": _macro_f1_from_predictions(predictions, class_count),
         "samples": float(total_samples),
         "duration_seconds": time.perf_counter() - started,
     }, predictions
@@ -649,11 +685,31 @@ def _plot_history(
     axes[0].set(title="Loss", xlabel="Epoch", ylabel="Cross entropy")
     axes[0].legend()
     axes[0].grid(alpha=0.3)
-    axes[1].plot(epochs, [item["train_top1"] for item in history], marker="o", label="train")
     axes[1].plot(
-        epochs, [item["validation_top1"] for item in history], marker="o", label="validation"
+        epochs, [item["train_top1"] for item in history], marker="o", label="train top-1"
     )
-    axes[1].set(title="Top-1 accuracy", xlabel="Epoch", ylabel="Accuracy", ylim=(0, 1))
+    axes[1].plot(
+        epochs,
+        [item["validation_top1"] for item in history],
+        marker="o",
+        label="validation top-1",
+    )
+    if all("train_macro_f1" in item and "validation_macro_f1" in item for item in history):
+        axes[1].plot(
+            epochs,
+            [item["train_macro_f1"] for item in history],
+            marker="x",
+            linestyle="--",
+            label="train macro-F1",
+        )
+        axes[1].plot(
+            epochs,
+            [item["validation_macro_f1"] for item in history],
+            marker="x",
+            linestyle="--",
+            label="validation macro-F1",
+        )
+    axes[1].set(title="Top-1 and macro-F1", xlabel="Epoch", ylabel="Score", ylim=(0, 1))
     axes[1].legend()
     axes[1].grid(alpha=0.3)
     figure.suptitle(
@@ -931,6 +987,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase="train",
             epoch=epoch,
             epochs=args.epochs,
+            class_count=args.classes,
             progress_every=args.progress_every,
             start_batch=start_batch if epoch == start_epoch else 0,
             checkpoint_every=args.checkpoint_every,
@@ -960,15 +1017,18 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase="validation",
             epoch=epoch,
             epochs=args.epochs,
+            class_count=args.classes,
             progress_every=args.progress_every,
         )
         record = {
             "epoch": epoch + 1,
             "train_loss": train_metrics["loss"],
             "train_top1": train_metrics["top1_accuracy"],
+            "train_macro_f1": train_metrics["macro_f1"],
             "train_samples": int(train_metrics["samples"]),
             "validation_loss": validation_metrics["loss"],
             "validation_top1": validation_metrics["top1_accuracy"],
+            "validation_macro_f1": validation_metrics["macro_f1"],
             "validation_samples": int(validation_metrics["samples"]),
         }
         improved = (
@@ -1016,7 +1076,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         _plot_history(plt, history, output_root / "training_curves.png", args.classes)
         print(
             f"[epoch {epoch + 1}] train top1={record['train_top1']:.3f}; "
-            f"validation top1={record['validation_top1']:.3f}; best={improved}; "
+            f"macro-F1={record['train_macro_f1']:.3f}; "
+            f"validation top1={record['validation_top1']:.3f}; "
+            f"macro-F1={record['validation_macro_f1']:.3f}; best={improved}; "
             f"early-stop wait={early_stopping_bad_epochs}/{args.early_stopping_patience}",
             flush=True,
         )
@@ -1067,6 +1129,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             phase=f"final-{split}",
             epoch=max(0, len(history) - 1),
             epochs=max(1, len(history)),
+            class_count=args.classes,
             progress_every=args.progress_every,
         )
         prediction_path = output_root / f"{split}_predictions.csv"

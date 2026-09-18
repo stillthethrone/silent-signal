@@ -7,6 +7,7 @@ import pytest
 
 from silent_signal.cli.train_videomaev2_demo import (
     _balanced_cap,
+    _macro_f1_from_predictions,
     _select_demo_rows,
     _trailing_non_improving_epochs,
     build_parser,
@@ -104,6 +105,25 @@ def test_early_stopping_min_delta_rejects_tiny_improvements() -> None:
     ]
 
     assert _trailing_non_improving_epochs(history, min_delta=0.001) == 2
+
+
+def test_macro_f1_gives_each_class_equal_weight() -> None:
+    predictions = [
+        {"true_class": 0, "pred_class": 0},
+        {"true_class": 1, "pred_class": 0},
+    ]
+
+    # Class 0 F1 is 2/3, class 1 F1 is 0, so their unweighted mean is 1/3.
+    assert _macro_f1_from_predictions(predictions, class_count=2) == pytest.approx(1 / 3)
+
+
+def test_macro_f1_is_one_when_every_class_is_correct() -> None:
+    predictions = [
+        {"true_class": class_index, "pred_class": class_index}
+        for class_index in range(50)
+    ]
+
+    assert _macro_f1_from_predictions(predictions, class_count=50) == 1.0
 
 
 def test_regularized_baseline_defaults_are_conservative() -> None:
