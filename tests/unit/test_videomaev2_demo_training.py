@@ -8,10 +8,12 @@ import pytest
 from silent_signal.cli.train_videomaev2_demo import (
     _balanced_cap,
     _macro_f1_from_predictions,
+    _resplit_demo_rows,
     _select_demo_rows,
     _trailing_non_improving_epochs,
     build_parser,
 )
+from silent_signal.contracts import ManifestRecord
 
 _ROOT = Path(__file__).parents[2]
 _TRAINER = _ROOT / "src/silent_signal/cli/train_videomaev2_demo.py"
@@ -61,6 +63,44 @@ def test_demo_selection_rejects_cross_split_sample_leakage(tmp_path: Path) -> No
 
     with pytest.raises(RuntimeError, match="Duplicate sample_id"):
         _select_demo_rows(rows, _selection(tmp_path / "selection.json"), 50)
+
+
+def test_custom_demo_split_is_reproducible_signer_disjoint_and_complete() -> None:
+    rows = [
+        ManifestRecord(
+            sample_id=f"{signer:03d}-{class_index}",
+            instance_id=f"{signer:03d}-{class_index}",
+            video_id=f"{signer:03d}-{class_index}",
+            signer_id=f"{signer:03d}",
+            gloss_id=str(class_index),
+            gloss_name=f"WORD_{class_index}",
+            class_index=class_index,
+            view="single",
+            video_path=f"videos/{signer:03d}-{class_index}.mp4",
+            split=("train", "validation", "test")[signer % 3],
+        ).to_dict(csv_safe=True)
+        for signer in range(10)
+        for class_index in range(2)
+    ]
+    arguments = {
+        "ratios": {"train": 0.65, "validation": 0.25, "test": 0.10},
+        "seed": 42,
+        "search_trials": 20,
+    }
+
+    first, definition = _resplit_demo_rows(rows, **arguments)
+    second, _ = _resplit_demo_rows(rows, **arguments)
+
+    assert first == second
+    assert definition["signer_counts"] == {"train": 7, "validation": 2, "test": 1}
+    assert all(row["source_split"] in {"train", "validation", "test"} for row in first)
+    for split in ("train", "validation", "test"):
+        split_rows = [row for row in first if row["split"] == split]
+        assert {int(row["class_index"]) for row in split_rows} == {0, 1}
+    signer_splits: dict[str, set[str]] = {}
+    for row in first:
+        signer_splits.setdefault(str(row["signer_id"]), set()).add(str(row["split"]))
+    assert all(len(splits) == 1 for splits in signer_splits.values())
 
 
 def test_demo_selection_skips_ranked_class_missing_an_official_split(tmp_path: Path) -> None:

@@ -77,6 +77,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--resplit-by-signer", action="store_true")
+    parser.add_argument("--train-ratio", type=float, default=0.65)
+    parser.add_argument("--validation-ratio", type=float, default=0.25)
+    parser.add_argument("--test-ratio", type=float, default=0.10)
+    parser.add_argument("--split-search-trials", type=int, default=20_000)
     parser.add_argument("--device", choices=("auto", "cuda", "cpu"), default="auto")
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--run-test", action="store_true")
@@ -198,6 +203,38 @@ def _write_demo_manifest(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         writer.writerows(rows)
     temporary.replace(path)
+
+
+def _resplit_demo_rows(
+    rows: list[dict[str, Any]],
+    *,
+    ratios: dict[str, float],
+    seed: int,
+    search_trials: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    from silent_signal.contracts import ManifestRecord
+    from silent_signal.data.splits import create_signer_disjoint_split
+
+    record_fields = set(ManifestRecord.__dataclass_fields__)
+    records = tuple(
+        ManifestRecord.from_dict({key: value for key, value in row.items() if key in record_fields})
+        for row in rows
+    )
+    assigned, definition = create_signer_disjoint_split(
+        records,
+        ratios=ratios,
+        seed=seed,
+        search_trials=search_trials,
+        require_all_glosses=True,
+    )
+    split_by_sample = {record.sample_id: str(record.split) for record in assigned}
+    result = []
+    for row in rows:
+        item = dict(row)
+        item["source_split"] = str(row["split"])
+        item["split"] = split_by_sample[str(row["sample_id"])]
+        result.append(item)
+    return result, definition.to_dict()
 
 
 def _balanced_cap(
@@ -724,6 +761,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("color-jitter must be in [0, 1).")
     if args.gradient_clip_norm < 0:
         raise ValueError("gradient-clip-norm must be non-negative.")
+    split_ratios = {
+        "train": args.train_ratio,
+        "validation": args.validation_ratio,
+        "test": args.test_ratio,
+    }
+    if any(value <= 0 for value in split_ratios.values()):
+        raise ValueError("Split ratios must be positive.")
+    if abs(sum(split_ratios.values()) - 1.0) > 1e-9:
+        raise ValueError("Split ratios must sum to 1.0.")
+    if args.split_search_trials < 1:
+        raise ValueError("split-search-trials must be at least 1.")
 
     # This is a PyTorch-only pipeline. Colab also preinstalls TensorFlow/JAX; letting
     # Transformers probe those optional backends can import a JAX build that is
@@ -757,6 +805,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     selected_rows, ranked = _select_demo_rows(
         manifest_rows, args.selection_report.resolve(), args.classes
     )
+    split_definition = None
+    if args.resplit_by_signer:
+        selected_rows, split_definition = _resplit_demo_rows(
+            selected_rows,
+            ratios=split_ratios,
+            seed=args.seed,
+            search_trials=args.split_search_trials,
+        )
     split_rows = {
         split: [row for row in selected_rows if row["split"] == split]
         for split in ("train", "validation", "test")
@@ -803,6 +859,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 },
             }
         )
+    split_policy = (
+        "custom deterministic signer-disjoint "
+        f"{args.train_ratio:.0%}/{args.validation_ratio:.0%}/{args.test_ratio:.0%} demo split; "
+        "derived from all selected official samples; no signer overlap"
+        if args.resplit_by_signer
+        else "official ASL Citizen train/validation/test; never re-split"
+    )
     selection_payload = {
         "schema_version": 1,
         "warning": "DEMO 50 classes; do not compare these metrics with the final 200-class study.",
@@ -810,7 +873,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             "highest-ranked 50 ASL-LEX classes from the frozen top-200 report "
             "that contain clips in every official split"
         ),
-        "split_policy": "official ASL Citizen train/validation/test; never re-split",
+        "split_policy": split_policy,
+        "split_definition": split_definition,
         "manifest_sha256": manifest_sha,
         "source_selection_sha256": selection_sha,
         "clips": {split: len(rows) for split, rows in split_rows.items()},
@@ -832,7 +896,21 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"test {counts['test']:>3} ({percentages['test']:>5.1f}%)",
             flush=True,
         )
-    print("Split isolation: PASS — no sample_id overlap.\n", flush=True)
+    signer_sets = {
+        split: {str(row["signer_id"]) for row in split_rows[split]} for split in split_rows
+    }
+    if (
+        signer_sets["train"] & signer_sets["validation"]
+        or signer_sets["train"] & signer_sets["test"]
+        or signer_sets["validation"] & signer_sets["test"]
+    ):
+        raise RuntimeError("Signer leakage between train/validation/test.")
+    print(
+        "Split isolation: PASS — no sample_id or signer overlap | signers:",
+        {split: len(values) for split, values in signer_sets.items()},
+        "\n",
+        flush=True,
+    )
     print("Manifest tách riêng trên Drive:", flush=True)
     for split, path in split_manifest_paths.items():
         print(f"- {split}: {path} ({len(split_rows[split])} clips)", flush=True)
@@ -899,6 +977,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "gradient_clip_norm": args.gradient_clip_norm,
         "max_train_batches": args.max_train_batches,
         "max_eval_batches": args.max_eval_batches,
+        "split_policy": split_policy,
     }
     start_epoch = 0
     start_batch = 0
@@ -1132,7 +1211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
         "study_stage": "complete-data 50-class RGB-only demo; not the final 200-class benchmark",
-        "split_policy": "official ASL Citizen train/validation/test; test excluded from tuning",
+        "split_policy": split_policy + "; test excluded from tuning",
         "model": metadata,
         "device": str(device),
         "total_parameters": total_parameters,

@@ -218,7 +218,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     axis = split_table.plot(kind="bar", figsize=(14, 6), width=0.85)
     axis.set(
         ylabel="Clips",
-        title="Official ASL Citizen split counts for the selected 50 words",
+        title="Train/validation/test counts for the selected 50 words",
     )
     axis.grid(axis="y", alpha=0.3)
     plt.xticks(rotation=60, ha="right")

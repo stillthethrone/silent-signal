@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import pytest
+
 from silent_signal.configuration import DatasetConfig
 from silent_signal.contracts import ManifestRecord
 from silent_signal.data.manifest import build_manifest
-from silent_signal.data.splits import create_signer_disjoint_split
+from silent_signal.data.splits import SplitError, create_signer_disjoint_split
 
 
 def test_split_is_deterministic_and_signer_disjoint(dataset_config: DatasetConfig) -> None:
@@ -71,3 +73,29 @@ def test_twenty_eight_signers_allocate_as_twenty_two_three_three() -> None:
     )
 
     assert definition.signer_counts == {"train": 22, "validation": 3, "test": 3}
+
+
+def test_required_gloss_coverage_rejects_allocations_missing_a_class() -> None:
+    records = tuple(
+        ManifestRecord(
+            sample_id=f"{signer}-{class_index}",
+            instance_id=f"{signer}-{class_index}",
+            video_id=f"{signer}-{class_index}",
+            signer_id=signer,
+            gloss_id=str(class_index),
+            gloss_name=f"WORD_{class_index}",
+            class_index=class_index,
+            view="single",
+            video_path=f"videos/{signer}-{class_index}.mp4",
+        )
+        for signer, classes in (("train-only", (0, 1)), ("val-only", (0,)), ("test-only", (1,)))
+        for class_index in classes
+    )
+
+    with pytest.raises(SplitError, match="every gloss represented"):
+        create_signer_disjoint_split(
+            records,
+            ratios={"train": 0.65, "validation": 0.25, "test": 0.10},
+            search_trials=20,
+            require_all_glosses=True,
+        )

@@ -63,12 +63,17 @@ def test_videomaev2_demo_notebook_is_bounded_reproducible_and_leak_free() -> Non
     assert "--early-stopping-patience" in source
     assert "best_checkpoint.pt" in source
     assert "Macro-F1 = trung bình F1 của từng từ" in source
-    assert "RESUME = True" in source
+    assert "RESUME = False" in source
     assert "RUN_TEST = False" in source
+    assert "CUSTOM_SIGNER_SPLIT = True" in source
+    assert "TRAIN_RATIO = 0.65" in source
+    assert "VALIDATION_RATIO = 0.25" in source
+    assert "TEST_RATIO = 0.10" in source
+    assert "--resplit-by-signer" in source
     assert "PERSIST_VIDEO_CACHE = True" in source
     assert "datasets/asl_citizen_top30" in source
     assert "tái sử dụng cache top-30" in source
-    assert "videomaev2_rgb_transformer_demo50_e50_compact_v1" in source
+    assert "videomaev2_rgb_transformer_demo50_split65_25_10_v1" in source
     assert "persistent_video_cache.json" in source
     assert "include_paths=selected_video_paths" in source
     assert "silent_signal.cli.train_videomaev2_demo" in source
@@ -78,7 +83,7 @@ def test_videomaev2_error_analysis_defaults_to_validation_and_visualizes_errors(
     notebook, source = _source(_ANALYSIS_NOTEBOOK)
     _assert_clean(notebook)
     assert "ANALYSIS_SPLIT = 'validation'" in source
-    assert "videomaev2_rgb_transformer_demo50_e50_compact_v1" in source
+    assert "videomaev2_rgb_transformer_demo50_split65_25_10_v1" in source
     assert "ALLOW_TEST_ANALYSIS = False" in source
     assert "drive_ready" in source
     assert "force_remount=True" in source

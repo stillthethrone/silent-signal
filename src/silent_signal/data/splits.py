@@ -33,6 +33,7 @@ def create_signer_disjoint_split(
     seed: int = 42,
     search_trials: int = 5000,
     signer_ids: Mapping[str, Sequence[str]] | None = None,
+    require_all_glosses: bool = False,
 ) -> tuple[tuple[ManifestRecord, ...], SplitDefinition]:
     """Assign whole signers to splits while balancing size and gloss distribution."""
 
@@ -53,6 +54,7 @@ def create_signer_disjoint_split(
             normalized_ratios,
             seed=seed,
             search_trials=search_trials,
+            require_all_glosses=require_all_glosses,
         )
     else:
         allocation = _validate_explicit_allocation(signer_ids, all_signers)
@@ -89,7 +91,7 @@ def load_signer_allocation(path: str | Path) -> dict[str, tuple[str, ...]]:
     for split in _SPLITS:
         values = candidate.get(split)
         if not isinstance(values, list) or not all(
-            isinstance(value, (str, int)) for value in values
+            isinstance(value, str | int) for value in values
         ):
             raise SplitError(f"signer_ids.{split} must be a list of signer ids.")
         result[split] = tuple(sorted(_normalize_signer(value) for value in values))
@@ -220,6 +222,7 @@ def _search_allocation(
     *,
     seed: int,
     search_trials: int,
+    require_all_glosses: bool,
 ) -> dict[str, tuple[str, ...]]:
     signers = sorted(stats)
     counts = _allocate_counts(len(signers), ratios)
@@ -236,6 +239,8 @@ def _search_allocation(
             next_cursor = cursor + counts[split]
             candidate[split] = tuple(sorted(shuffled[cursor:next_cursor]))
             cursor = next_cursor
+        if require_all_glosses and not _has_complete_gloss_coverage(candidate, stats):
+            continue
         score = _score_allocation(candidate, stats, ratios)
         lexical = tuple(candidate[split] for split in _SPLITS)
         key = (score, lexical)
@@ -244,8 +249,20 @@ def _search_allocation(
             best_key = key
 
     if best is None:
-        raise SplitError("Split search did not produce a candidate.")
+        detail = " with every gloss represented in every split" if require_all_glosses else ""
+        raise SplitError(f"Split search did not produce a candidate{detail}.")
     return best
+
+
+def _has_complete_gloss_coverage(
+    allocation: Mapping[str, Sequence[str]], stats: Mapping[str, _SignerStats]
+) -> bool:
+    all_glosses = set().union(*(item.gloss_counts for item in stats.values()))
+    for split in _SPLITS:
+        split_glosses = set().union(*(stats[signer].gloss_counts for signer in allocation[split]))
+        if split_glosses != all_glosses:
+            return False
+    return True
 
 
 def _allocate_counts(total: int, ratios: Mapping[str, float]) -> dict[str, int]:
