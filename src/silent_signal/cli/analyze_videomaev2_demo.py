@@ -1,4 +1,4 @@
-"""Analyze validation or test errors from the 50-class RGB Transformer demo."""
+"""Analyze validation or test errors from a 50-class sign-recognition run."""
 
 from __future__ import annotations
 
@@ -13,9 +13,17 @@ from typing import Any
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="python -m silent_signal.cli.analyze_videomaev2_demo",
-        description="Error analysis for the RGB-only VideoMAE V2 demo.",
+        description="Error analysis for a 50-class RGB-only or dual-stream demo.",
     )
-    parser.add_argument("--baseline-root", type=Path, required=True)
+    roots = parser.add_mutually_exclusive_group(required=True)
+    roots.add_argument("--baseline-root", dest="run_root", type=Path)
+    roots.add_argument("--run-root", dest="run_root", type=Path)
+    parser.add_argument("--selection-report", type=Path)
+    parser.add_argument("--training-report", type=Path)
+    parser.add_argument(
+        "--model-label",
+        default="VideoMAE V2 + RGB Transformer demo",
+    )
     parser.add_argument("--split", choices=("validation", "test"), default="validation")
     parser.add_argument("--top-errors", type=int, default=15)
     return parser
@@ -37,16 +45,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     import seaborn as sns
     from sklearn.metrics import classification_report, confusion_matrix
 
-    baseline_root = args.baseline_root.resolve()
-    selection_path = baseline_root / "selected_50_words.json"
-    baseline_report_path = baseline_root / "baseline_report.json"
-    predictions_path = baseline_root / f"{args.split}_predictions.csv"
-    for path in (selection_path, baseline_report_path, predictions_path):
+    run_root = args.run_root.resolve()
+    selection_path = (
+        args.selection_report.resolve()
+        if args.selection_report is not None
+        else run_root / "selected_50_words.json"
+    )
+    training_report_path = (
+        args.training_report.resolve()
+        if args.training_report is not None
+        else run_root / "baseline_report.json"
+    )
+    predictions_path = run_root / f"{args.split}_predictions.csv"
+    for path in (selection_path, training_report_path, predictions_path):
         if not path.is_file():
             raise FileNotFoundError(path)
 
     selection = json.loads(selection_path.read_text(encoding="utf-8"))
-    baseline_report = json.loads(baseline_report_path.read_text(encoding="utf-8"))
+    training_report = json.loads(training_report_path.read_text(encoding="utf-8"))
     classes = list(selection["classes"])
     if len(classes) != 50:
         raise RuntimeError("Error analysis expects exactly 50 demo classes.")
@@ -110,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             for index, label in enumerate(labels)
         ]
     )
-    per_class_path = baseline_root / f"{args.split}_per_class_metrics.csv"
+    per_class_path = run_root / f"{args.split}_per_class_metrics.csv"
     per_class.to_csv(per_class_path, index=False)
 
     sns.set_theme(style="whitegrid")
@@ -127,9 +143,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     for axis in axes:
         axis.set_xticks(tick_positions, labels, rotation=75, ha="right")
         axis.set_yticks(tick_positions, labels, rotation=0)
-    figure.suptitle("VideoMAE V2 + RGB Transformer demo (50 classes; not final benchmark)")
+    figure.suptitle(f"{args.model_label} (50 classes; not final benchmark)")
     figure.tight_layout()
-    confusion_path = baseline_root / f"{args.split}_confusion_matrices.png"
+    confusion_path = run_root / f"{args.split}_confusion_matrices.png"
     figure.savefig(confusion_path, dpi=160, bbox_inches="tight")
     plt.close(figure)
 
@@ -143,7 +159,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     axis.legend()
     axis.grid(axis="x", alpha=0.3)
     figure.tight_layout()
-    per_class_plot = baseline_root / f"{args.split}_per_class_metrics.png"
+    per_class_plot = run_root / f"{args.split}_per_class_metrics.png"
     figure.savefig(per_class_plot, dpi=160, bbox_inches="tight")
     plt.close(figure)
 
@@ -160,7 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     axis.legend()
     figure.tight_layout()
-    confidence_path = baseline_root / f"{args.split}_confidence_histogram.png"
+    confidence_path = run_root / f"{args.split}_confidence_histogram.png"
     figure.savefig(confidence_path, dpi=160, bbox_inches="tight")
     plt.close(figure)
 
@@ -185,7 +201,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     axis.set(xlabel="Misclassified clips", title=f"Top confusion directions ({args.split})")
     axis.grid(axis="x", alpha=0.3)
     figure.tight_layout()
-    confusion_pairs_path = baseline_root / f"{args.split}_top_confusions.png"
+    confusion_pairs_path = run_root / f"{args.split}_top_confusions.png"
     figure.savefig(confusion_pairs_path, dpi=160, bbox_inches="tight")
     plt.close(figure)
 
@@ -206,15 +222,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     axis.grid(axis="y", alpha=0.3)
     plt.xticks(rotation=60, ha="right")
     plt.tight_layout()
-    split_plot_path = baseline_root / "selected_50_official_split_counts.png"
+    split_plot_path = run_root / "selected_50_official_split_counts.png"
     plt.savefig(split_plot_path, dpi=160, bbox_inches="tight")
     plt.close()
 
-    evaluation = baseline_report.get("evaluation", {}).get(args.split, {})
+    evaluation = training_report.get("evaluation", {}).get(args.split, {})
     accuracy = float((y_true == y_pred).mean())
     lowest_recall = per_class.sort_values(["recall", "support"]).head(5).to_dict("records")
-    history = list(baseline_report.get("history", ()))
-    best_epoch = int(baseline_report.get("best_epoch", 0))
+    history = list(training_report.get("history", ()))
+    best_epoch = int(training_report.get("best_epoch", 0))
     best_record = next(
         (item for item in history if int(item.get("epoch", -1)) == best_epoch),
         None,
@@ -273,7 +289,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "created_utc": datetime.now(UTC).isoformat(),
         "state": "passed",
-        "study_stage": "complete-data 50-class RGB-only demo error analysis",
+        "study_stage": f"complete-data 50-class error analysis: {args.model_label}",
+        "model_label": args.model_label,
+        "training_report": str(training_report_path),
         "analysis_split": args.split,
         "warning": (
             "Use validation errors to design improvements. Do not tune from test results; "
@@ -300,7 +318,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "official_split_counts": str(split_plot_path),
         },
     }
-    report_path = baseline_root / f"{args.split}_error_analysis.json"
+    report_path = run_root / f"{args.split}_error_analysis.json"
     _write_json_atomic(report_path, report)
     print(
         f"[{args.split}] top1={accuracy:.3f}; macro-F1={report['macro_f1']:.3f}; "

@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--checkpoint-every", type=int, default=20)
     parser.add_argument("--early-stopping-patience", type=int, default=5)
     parser.add_argument("--early-stopping-min-delta", type=float, default=0.005)
+    parser.add_argument("--overfit-monitor-patience", type=int, default=3)
+    parser.add_argument("--overfit-min-epoch", type=int, default=6)
+    parser.add_argument("--overfit-loss-gap", type=float, default=0.5)
+    parser.add_argument("--overfit-top1-gap", type=float, default=0.2)
+    parser.add_argument("--overfit-validation-loss-regression", type=float, default=0.1)
     parser.add_argument("--progress-every", type=int, default=5)
     parser.add_argument("--num-workers", type=int, default=2)
     parser.add_argument("--seed", type=int, default=42)
@@ -344,6 +349,27 @@ def _comparison_payload(
     }
 
 
+def _is_overfit_epoch(
+    record: dict[str, Any],
+    *,
+    best_validation_loss: float,
+    min_epoch: int,
+    loss_gap: float,
+    top1_gap: float,
+    validation_loss_regression: float,
+) -> bool:
+    """Return true only for a sustained generalization failure, not a healthy gap alone."""
+
+    if int(record["epoch"]) < min_epoch:
+        return False
+    return bool(
+        float(record["validation_loss"]) - float(record["train_loss"]) >= loss_gap
+        and float(record["train_top1"]) - float(record["validation_top1"]) >= top1_gap
+        and float(record["validation_loss"]) - best_validation_loss
+        >= validation_loss_regression
+    )
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.classes != 50:
@@ -352,6 +378,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise ValueError("RGB and pose embedding dimensions must match for cross-attention.")
     if min(args.epochs, args.batch_size, args.progress_every) < 1:
         raise ValueError("epochs, batch-size, and progress-every must be positive.")
+    if min(args.overfit_monitor_patience, args.overfit_min_epoch) < 0:
+        raise ValueError("overfit patience and minimum epoch must be non-negative.")
+    if min(
+        args.overfit_loss_gap,
+        args.overfit_top1_gap,
+        args.overfit_validation_loss_regression,
+    ) < 0:
+        raise ValueError("overfit thresholds must be non-negative.")
 
     os.environ.setdefault("USE_TF", "0")
     os.environ.setdefault("USE_FLAX", "0")
@@ -517,12 +551,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         "learning_rate": args.learning_rate,
         "weight_decay": args.weight_decay,
         "label_smoothing": args.label_smoothing,
+        "overfit_monitor": {
+            "patience": args.overfit_monitor_patience,
+            "min_epoch": args.overfit_min_epoch,
+            "loss_gap": args.overfit_loss_gap,
+            "top1_gap": args.overfit_top1_gap,
+            "validation_loss_regression": args.overfit_validation_loss_regression,
+        },
     }
     start_epoch = 0
     start_batch = 0
     best_validation_loss = float("inf")
     bad_epochs = 0
+    overfit_epochs = 0
     stopped_early = False
+    stop_reason: str | None = None
     history: list[dict[str, Any]] = []
     if args.resume and last_checkpoint.is_file():
         checkpoint = torch.load(last_checkpoint, map_location="cpu", weights_only=False)
@@ -540,9 +583,11 @@ def main(argv: Sequence[str] | None = None) -> int:
                 _trailing_non_improving_epochs(history, args.early_stopping_min_delta),
             )
         )
+        overfit_epochs = int(checkpoint.get("overfit_bad_epochs", 0))
         print(
             f"RESUME: epoch {start_epoch + 1}, batch {start_batch}; "
-            f"early-stop wait={bad_epochs}/{args.early_stopping_patience}",
+            f"early-stop wait={bad_epochs}/{args.early_stopping_patience}; "
+            f"overfit wait={overfit_epochs}/{args.overfit_monitor_patience}",
             flush=True,
         )
 
@@ -576,21 +621,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             current_epoch: int = epoch,
             current_best: float = best_validation_loss,
             current_bad_epochs: int = bad_epochs,
+            current_overfit_epochs: int = overfit_epochs,
         ) -> None:
-            _save_torch_atomic(
-                torch,
-                last_checkpoint,
-                _checkpoint_payload(
-                    model,
-                    optimizer,
-                    epoch=current_epoch,
-                    next_batch=next_batch,
-                    best_validation_loss=current_best,
-                    early_stopping_bad_epochs=current_bad_epochs,
-                    history=history,
-                    metadata=metadata,
-                ),
+            progress_payload = _checkpoint_payload(
+                model,
+                optimizer,
+                epoch=current_epoch,
+                next_batch=next_batch,
+                best_validation_loss=current_best,
+                early_stopping_bad_epochs=current_bad_epochs,
+                history=history,
+                metadata=metadata,
             )
+            progress_payload["overfit_bad_epochs"] = current_overfit_epochs
+            _save_torch_atomic(torch, last_checkpoint, progress_payload)
             print(
                 f"[checkpoint] epoch {current_epoch + 1}, next batch {next_batch}",
                 flush=True,
@@ -658,8 +702,23 @@ def main(argv: Sequence[str] | None = None) -> int:
             bad_epochs = 0
         else:
             bad_epochs += 1
+        record["loss_generalization_gap"] = (
+            record["validation_loss"] - record["train_loss"]
+        )
+        record["top1_generalization_gap"] = record["train_top1"] - record["validation_top1"]
+        overfit_signal = _is_overfit_epoch(
+            record,
+            best_validation_loss=best_validation_loss,
+            min_epoch=args.overfit_min_epoch,
+            loss_gap=args.overfit_loss_gap,
+            top1_gap=args.overfit_top1_gap,
+            validation_loss_regression=args.overfit_validation_loss_regression,
+        )
+        overfit_epochs = overfit_epochs + 1 if overfit_signal else 0
         record["improved"] = improved
         record["early_stopping_bad_epochs"] = bad_epochs
+        record["overfit_signal"] = overfit_signal
+        record["overfit_bad_epochs"] = overfit_epochs
         history.append(record)
         payload = _checkpoint_payload(
             model,
@@ -671,6 +730,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             history=history,
             metadata=metadata,
         )
+        payload["overfit_bad_epochs"] = overfit_epochs
         if improved:
             _save_torch_atomic(torch, best_checkpoint, payload)
         _save_torch_atomic(torch, last_checkpoint, payload)
@@ -681,13 +741,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"macro-F1={record['train_macro_f1']:.3f}; validation "
             f"top1={record['validation_top1']:.3f}, "
             f"macro-F1={record['validation_macro_f1']:.3f}; best={improved}; "
-            f"early-stop wait={bad_epochs}/{args.early_stopping_patience}",
+            f"gap(loss/top1)={record['loss_generalization_gap']:.3f}/"
+            f"{record['top1_generalization_gap']:.3f}; "
+            f"early-stop wait={bad_epochs}/{args.early_stopping_patience}; "
+            f"overfit wait={overfit_epochs}/{args.overfit_monitor_patience}",
             flush=True,
         )
         start_batch = 0
         if args.early_stopping_patience > 0 and bad_epochs >= args.early_stopping_patience:
             stopped_early = True
-            print(f"EARLY STOP at epoch {epoch + 1}; restoring best checkpoint.", flush=True)
+            stop_reason = "validation_loss_no_improvement"
+            print(
+                f"EARLY STOP at epoch {epoch + 1}: validation loss did not improve; "
+                "restoring best checkpoint.",
+                flush=True,
+            )
+            break
+        if (
+            args.overfit_monitor_patience > 0
+            and overfit_epochs >= args.overfit_monitor_patience
+        ):
+            stopped_early = True
+            stop_reason = "sustained_overfit_signal"
+            print(
+                f"OVERFIT STOP at epoch {epoch + 1}: loss/top-1 gaps remained large while "
+                "validation loss regressed from its best value; restoring best checkpoint.",
+                flush=True,
+            )
             break
 
     if not best_checkpoint.is_file():
@@ -750,6 +830,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             "patience": args.early_stopping_patience,
             "min_delta": args.early_stopping_min_delta,
             "triggered": stopped_early,
+            "reason": stop_reason,
+        },
+        "overfit_monitor": {
+            "patience": args.overfit_monitor_patience,
+            "min_epoch": args.overfit_min_epoch,
+            "loss_gap": args.overfit_loss_gap,
+            "top1_gap": args.overfit_top1_gap,
+            "validation_loss_regression": args.overfit_validation_loss_regression,
+            "final_wait": overfit_epochs,
+            "triggered": stop_reason == "sustained_overfit_signal",
         },
         "history": history,
         "evaluation": evaluation,

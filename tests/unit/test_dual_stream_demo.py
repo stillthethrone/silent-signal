@@ -4,7 +4,9 @@ import pytest
 import torch
 from torch import nn
 
+from silent_signal.cli.analyze_videomaev2_demo import build_parser as build_analysis_parser
 from silent_signal.cli.train_dual_stream_demo import (
+    _is_overfit_epoch,
     _validate_selected_manifest,
     build_parser,
 )
@@ -46,7 +48,34 @@ def test_dual_stream_defaults_keep_both_branches_compact() -> None:
     assert args.pose_dropout == 0.3
     assert args.fusion_heads == 4
     assert args.fusion_dropout == 0.3
+    assert (
+        args.overfit_monitor_patience,
+        args.overfit_min_epoch,
+        args.overfit_loss_gap,
+        args.overfit_top1_gap,
+        args.overfit_validation_loss_regression,
+    ) == (3, 6, 0.5, 0.2, 0.1)
     assert args.run_test is False
+
+
+def test_analysis_cli_accepts_dual_stream_artifact_paths() -> None:
+    args = build_analysis_parser().parse_args(
+        [
+            "--run-root",
+            "dual-run",
+            "--selection-report",
+            "selected.json",
+            "--training-report",
+            "dual_stream_report.json",
+            "--model-label",
+            "dual-stream",
+        ]
+    )
+
+    assert str(args.run_root) == "dual-run"
+    assert str(args.selection_report) == "selected.json"
+    assert str(args.training_report) == "dual_stream_report.json"
+    assert args.model_label == "dual-stream"
 
 
 def test_selected_manifest_preserves_exact_baseline_mapping() -> None:
@@ -133,6 +162,25 @@ def test_cross_attention_fusion_preserves_embedding_shape() -> None:
 
     assert fused.shape == (3, 8)
     assert torch.isfinite(fused).all()
+
+
+def test_overfit_monitor_requires_validation_regression_from_best() -> None:
+    record = {
+        "epoch": 8,
+        "train_loss": 1.0,
+        "validation_loss": 2.1,
+        "train_top1": 0.8,
+        "validation_top1": 0.5,
+    }
+    thresholds = {
+        "min_epoch": 6,
+        "loss_gap": 0.5,
+        "top1_gap": 0.2,
+        "validation_loss_regression": 0.1,
+    }
+
+    assert not _is_overfit_epoch(record, best_validation_loss=2.05, **thresholds)
+    assert _is_overfit_epoch(record, best_validation_loss=1.8, **thresholds)
 
 
 class _FakeRGB(nn.Module):
