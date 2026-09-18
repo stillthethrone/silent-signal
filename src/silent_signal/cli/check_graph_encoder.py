@@ -318,7 +318,7 @@ def _log(stage: str, message: str) -> None:
 
 
 def _duration(seconds: float) -> str:
-    total = max(0, int(round(seconds)))
+    total = max(0, round(seconds))
     hours, remainder = divmod(total, 3600)
     minutes, secs = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{secs:02d}"
