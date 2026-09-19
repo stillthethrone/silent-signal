@@ -4,8 +4,10 @@ Reproducible isolated sign-language recognition research with ASL Citizen
 (American Sign Language) and VSL400 (Vietnamese Sign Language). The implemented
 milestones prepare and validate data, import ASL Citizen's official splits,
 support VSL400 signer allocation, and provide reproducible offline whole-body
-pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. Model
-training remains unimplemented scaffolding.
+pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. The
+ASL Citizen top-200 path now includes graph preprocessing and a tested
+Graph-Spatial-Temporal Encoder smoke-training boundary; full epoch-level
+training and held-out evaluation remain future milestones.
 
 ## ASL Citizen preparation
 
@@ -82,7 +84,8 @@ For Google Colab, open
 [00_asl_citizen_colab_preparation.ipynb](notebooks/00_asl_citizen_colab_preparation.ipynb).
 After data validation passes, use
 [03_rtmpose_wholebody_colab_check.ipynb](notebooks/03_rtmpose_wholebody_colab_check.ipynb)
-to verify the pinned OpenMMLab environment, download and hash the explicit
+to optionally stream-extract the full official ZIP directly from Microsoft,
+verify the pinned OpenMMLab environment, download and hash the explicit
 RTMDet-M/RTMPose-L artifacts, extract a smoke sample, inspect its raw 133-point
 cache and validate resume behavior. It can also be opened directly in
 [Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/dev/notebooks/03_rtmpose_wholebody_colab_check.ipynb)
@@ -91,6 +94,31 @@ It clones the project's `dev` branch, downloads the official ZIP when enabled,
 checks extraction space, imports the official CSVs, and stores preparation
 outputs and resumable validation progress in Drive. Push this implementation
 to the selected branch before running it. No Zenodo token is needed.
+
+To extract pose only for the 200 ASL Citizen classes with the highest ASL-LEX
+2.0 subjective conversational-frequency ratings, use
+[04_asl_citizen_top200_pose_extraction.ipynb](notebooks/04_asl_citizen_top200_pose_extraction.ipynb).
+It is standalone: on a fresh GPU runtime it can stream-extract ASL Citizen, build
+the official manifest, create the pinned OpenMMLab environment, download models,
+select the subset and extract pose without running notebooks `00` or `03`. It
+preserves the official splits and all clips in each selected class; it does not
+rank words by ASL Citizen video count. See the
+[top-200 selection contract](docs/asl_citizen_top200.md) for the exact rule,
+outputs, source, license, and limitations.
+
+After all 6,146 raw pose caches pass extraction, run
+[05_asl_citizen_top200_graph_preparation.ipynb](notebooks/05_asl_citizen_top200_graph_preparation.ipynb).
+It converts raw 133-keypoint sequences into resumable `[64, 75, 7]` graph tensors on Drive
+without reading videos or using a GPU. The configuration pins the completed manifest and
+extractor fingerprints and preserves the official splits. See the
+[graph preprocessing contract](docs/graph_preprocessing.md) for the feature, mask,
+normalization, and cache definitions.
+
+After graph preparation passes, use
+[06_asl_citizen_top200_graph_encoder_check.ipynb](notebooks/06_asl_citizen_top200_graph_encoder_check.ipynb)
+to validate the mask-aware Graph-Spatial-Temporal Encoder, its 200-class head, backward pass,
+optimizer step and atomic smoke checkpoint. This check is not full multi-epoch training; see
+the [graph encoder contract](docs/graph_encoder.md).
 
 The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
 files need roughly 89 GiB together, before extra working space or pose caches;
