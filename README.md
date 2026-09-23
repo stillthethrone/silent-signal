@@ -134,6 +134,25 @@ redistribution. Download it from the
 An ASL-trained recognizer is not a Vietnamese sign-language recognizer;
 transfer to VSL requires separate training and evaluation.
 
+## Multi-VSL Vietnamese baseline
+
+The standalone
+[Multi-VSL 50-class RGB baseline notebook](notebooks/09_multi_vsl_top50_videomaev2_rgb_transformer_baseline.ipynb)
+uses the official M-VSL200 center-view metadata and keeps its signer-disjoint
+train/validation/test assignment. It ranks eligible classes using training-set
+clip counts only, verifies every selected official video, freezes VideoMAE V2,
+and trains a compact 64-dimensional RGB Transformer with early stopping.
+Source videos remain in the temporary Colab runtime; only reproducibility
+manifests, logs, checkpoints, predictions, reports, and figures are saved to
+Google Drive.
+
+Open it in
+[Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/feat/multi-vsl-baseline/notebooks/09_multi_vsl_top50_videomaev2_rgb_transformer_baseline.ipynb).
+The authors' public Drive folder can be rate-limited or incomplete, so the
+notebook validates required files before training rather than silently using a
+partial download. Public metadata exposes numeric labels but not Vietnamese
+gloss text; reports therefore use stable `VSL_NNN` display labels.
+
 ## Implemented milestone: VSL400 preparation
 
 - Parse the three synchronized camera metadata files into one stable manifest.

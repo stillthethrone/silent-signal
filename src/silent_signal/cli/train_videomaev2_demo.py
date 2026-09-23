@@ -1,4 +1,4 @@
-"""Train a full-data RGB Transformer baseline on official ASL splits.
+"""Train a full-data RGB Transformer baseline on an official three-way split.
 
 Heavy video and training dependencies are imported only inside ``main`` so the
 core package remains usable without the optional Colab stack.
@@ -754,6 +754,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     output_root = args.output_root.resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     manifest_rows = _read_rows(args.manifest.resolve())
+    source_selection = json.loads(args.selection_report.resolve().read_text(encoding="utf-8"))
     selected_rows, ranked = _select_demo_rows(
         manifest_rows, args.selection_report.resolve(), args.classes
     )
@@ -796,7 +797,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "class_index": class_index,
                 "source_subset_class_index": int(item["source_subset_class_index"]),
                 "gloss_name": item["gloss_name"],
-                "sign_frequency_mean": item["sign_frequency_mean"],
+                "sign_frequency_mean": item.get("sign_frequency_mean"),
                 "counts": counts,
                 "percentages": {
                     split: round(count / total * 100, 2) for split, count in counts.items()
@@ -805,12 +806,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     selection_payload = {
         "schema_version": 1,
-        "warning": "DEMO 50 classes; do not compare these metrics with the final 200-class study.",
-        "selection": (
-            "highest-ranked 50 ASL-LEX classes from the frozen top-200 report "
-            "that contain clips in every official split"
+        "dataset_name": source_selection.get("dataset_name", "ASL Citizen"),
+        "warning": source_selection.get(
+            "warning",
+            f"DEMO {args.classes} classes; compare only runs using the same data contract.",
         ),
-        "split_policy": "official ASL Citizen train/validation/test; never re-split",
+        "selection": source_selection.get(
+            "selection", "ranked classes that contain clips in every official split"
+        ),
+        "split_policy": source_selection.get(
+            "split_policy", "official train/validation/test split; never re-split"
+        ),
         "manifest_sha256": manifest_sha,
         "source_selection_sha256": selection_sha,
         "clips": {split: len(rows) for split, rows in split_rows.items()},
@@ -821,7 +827,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         "classes": selected_words,
     }
     _write_json_atomic(output_root / "selected_50_words.json", selection_payload)
-    print("\n50 TỪ DEMO (xếp theo ASL-LEX SignFrequency):", flush=True)
+    print(
+        f"\n{args.classes} CLASSES — {selection_payload['dataset_name']} "
+        f"({selection_payload['selection']}):",
+        flush=True,
+    )
     for item in selected_words:
         counts = item["counts"]
         percentages = item["percentages"]
@@ -1131,8 +1141,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
-        "study_stage": "complete-data 50-class RGB-only demo; not the final 200-class benchmark",
-        "split_policy": "official ASL Citizen train/validation/test; test excluded from tuning",
+        "dataset_name": source_selection.get("dataset_name", "ASL Citizen"),
+        "study_stage": source_selection.get(
+            "study_stage", f"complete-data {args.classes}-class RGB-only demo"
+        ),
+        "split_policy": source_selection.get(
+            "split_policy", "official train/validation/test; test excluded from tuning"
+        ),
         "model": metadata,
         "device": str(device),
         "total_parameters": total_parameters,
