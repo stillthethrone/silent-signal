@@ -14,9 +14,12 @@ reuses the dataset-neutral `ss-extract-pose` and `ss-prepare-pose-graph` command
     synchronized `center`, `left` and `right` filenames and `label`.
 
   The signer comes from `_signerNN_` in each filename. `ord1` is the primary take.
-- Videos: the authors' single Google Drive folder (about 84,000 files, all views). Sampled
-  center clips are portrait MPEG-4, 566–606 × 720, about 30 fps, 2–4 s long. Faces are
-  pixelated by the authors.
+- Videos: the Google Drive folder linked in the authors' README holds only a **1,000-video
+  sample** spread over all 1,000 glosses, 30 signers and three views (checked 2026-09-25 with
+  both gdown and the Drive API). It contains 52 of the 4,311 videos the top-50 three-view
+  selection needs and no complete triplet, so the full release (about 84,000 videos) must be
+  requested from the authors. Sampled center clips are portrait MPEG-4, 566–606 × 720, about
+  30 fps, 2–4 s long. Faces are pixelated by the authors.
 - The public metadata has numeric labels only; no Vietnamese gloss text is published.
   `VSL_NNN` is a display label for source label `NNN-1`.
 

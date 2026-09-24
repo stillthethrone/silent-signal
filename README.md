@@ -55,9 +55,10 @@ Google Drive.
 
 Open it in
 [Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/feat/multi-vsl-baseline/notebooks/09_multi_vsl_top50_videomaev2_rgb_transformer_baseline.ipynb).
-The authors' public Drive folder can be rate-limited or incomplete, so the
-notebook validates required files before training rather than silently using a
-partial download. Public metadata exposes numeric labels but not Vietnamese
+The Drive folder linked by the authors holds only a 1,000-video sample (20 of
+the 1,496 clips this baseline needs), so the full release must be requested
+from the authors; the notebook validates required files before training rather
+than silently using a partial download. Public metadata exposes numeric labels but not Vietnamese
 gloss text; reports therefore use stable `VSL_NNN` display labels.
 
 ## Multi-VSL RTMPose extraction
@@ -66,8 +67,9 @@ gloss text; reports therefore use stable `VSL_NNN` display labels.
 RTMPose-L WholeBody keypoints for the same 50 M-VSL200 classes as the RGB
 baseline (or all 199), in all three synchronized views (center, left, right).
 It keeps the official signer-disjoint split (20/4/4 signers; 1,041/199/197
-recordings, 4,311 videos for the top 50), fetches only the required videos
-through the Drive API into the temporary runtime, and writes the manifest,
+recordings, 4,311 videos for the top 50), copies only the required videos
+from the full release (the public Drive sample is not enough) into the
+temporary runtime, and writes the manifest,
 split, class list, raw pose caches and `[64, 75, 7]` graph tensors to Google
 Drive. Locally, the same selection is available as:
 
