@@ -1,4 +1,4 @@
-"""Graph-spatial-temporal encoder for fixed ASL pose caches."""
+"""Graph-spatial-temporal encoder for fixed pose graph caches."""
 
 from __future__ import annotations
 

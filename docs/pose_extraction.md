@@ -1,6 +1,6 @@
 # RTMPose-L WholeBody extraction
 
-This milestone extracts raw 2D whole-body pose from ASL Citizen for the later
+This milestone extracts raw 2D whole-body pose from manifest videos for the later
 Graph-Spatial-Temporal Transformer. MMPose is the framework, RTMPose-L is the
 pose estimator, and RTMDet supplies the person box required by the top-down
 model. The implementation never uses the mutable `wholebody` alias.
@@ -50,7 +50,6 @@ equivalent form is `uv run ss-extract-pose`.
 Set these variables before invoking the CLI:
 
 ```powershell
-$env:ASL_CITIZEN_ROOT = "D:/datasets/ASL_Citizen"
 $env:MMPOSE_ROOT = "D:/src/mmpose"
 $env:RTMPOSE_L_WHOLEBODY_CHECKPOINT = "D:/models/rtmpose-l-wholebody-384x288.pth"
 $env:RTMDET_M_PERSON_CHECKPOINT = "D:/models/rtmdet-m-person.pth"
@@ -76,13 +75,13 @@ checkpoints and fails closed if a local artifact differs.
 
 ## Pilot extraction
 
-Start with a stratified pilot rather than all 83,399 clips:
+Start with a stratified pilot rather than the full manifest:
 
 ```powershell
 ss-extract-pose extract `
   --config configs/pose/rtmpose.yaml `
-  --manifest data/manifests/asl_citizen.parquet `
-  --dataset-root D:/datasets/ASL_Citizen `
+  --manifest data/manifests/vsl400.parquet `
+  --dataset-root D:/datasets/VSL400 `
   --split train `
   --limit 100
 ```
@@ -137,9 +136,9 @@ shared because sample assignments do not overlap.
 ```powershell
 ss-extract-pose extract `
   --config configs/pose/rtmpose.yaml `
-  --manifest data/manifests/asl_citizen.parquet `
-  --dataset-root D:/datasets/ASL_Citizen `
-  --output-root data/processed/pose/asl_citizen/rtmpose_l_coco_wholebody_384x288/raw `
+  --manifest data/manifests/vsl400.parquet `
+  --dataset-root D:/datasets/VSL400 `
+  --output-root data/processed/pose/vsl400/rtmpose_l_coco_wholebody_384x288/raw `
   --device cuda:0 `
   --num-shards 2 `
   --shard-index 0 `
@@ -157,7 +156,7 @@ produce actionable errors rather than silently skipping data.
 
 ## Transformer layout
 
-`asl_citizen_coco_wholebody_v1` derives 75 graph nodes from the raw 133:
+`coco_wholebody_75_v1` derives 75 graph nodes from the raw 133:
 
 - 13 upper-body points: COCO-WholeBody indices 0-12
 - 21 left-hand points: 91-111

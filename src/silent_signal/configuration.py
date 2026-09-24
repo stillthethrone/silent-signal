@@ -57,7 +57,6 @@ class SplitConfig:
     seed: int = 42
     search_trials: int = 5000
     official_file: Path | None = None
-    strategy: str = "signer_disjoint"
 
 
 @dataclass(frozen=True, slots=True)
@@ -80,8 +79,6 @@ class DatasetConfig:
     expected: ExpectedConfig
     split: SplitConfig
     outputs: OutputConfig
-    adapter: str = "vsl400"
-    metadata_splits: dict[str, str] = field(default_factory=dict)
 
 
 def load_dataset_config(
@@ -112,59 +109,32 @@ def load_dataset_config(
     root = root.resolve()
 
     adapter = str(dataset.get("adapter", "vsl400"))
-    if adapter not in {"vsl400", "asl_citizen"}:
+    if adapter != "vsl400":
         raise ConfigurationError(f"Unsupported dataset adapter: {adapter!r}.")
     views_raw = _mapping(dataset, "views")
-    canonical_views = (
-        (View.FRONT.value, View.LEFT.value, View.RIGHT.value)
-        if adapter == "vsl400"
-        else (View.SINGLE.value,)
-    )
+    canonical_views = (View.FRONT.value, View.LEFT.value, View.RIGHT.value)
     if set(views_raw) != set(canonical_views):
-        raise ConfigurationError(
-            f"Adapter {adapter!r} requires exactly these dataset views: {canonical_views}."
-        )
+        raise ConfigurationError(f"VSL400 requires exactly these dataset views: {canonical_views}.")
     views: dict[str, ViewConfig] = {}
     for view in canonical_views:
         entry = _mapping(views_raw, view)
         views[view] = ViewConfig(
             directory=_required_str(entry, "directory"),
-            metadata=(
-                _required_str(entry, "metadata")
-                if adapter == "vsl400"
-                else _optional_string(entry.get("metadata"))
-            ),
+            metadata=_required_str(entry, "metadata"),
             directory_aliases=_string_tuple(entry.get("directory_aliases", ())),
             metadata_aliases=_string_tuple(entry.get("metadata_aliases", ())),
         )
 
     strategy = str(split.get("strategy", "signer_disjoint"))
-    required_strategy = "official" if adapter == "asl_citizen" else "signer_disjoint"
-    if strategy != required_strategy:
-        raise ConfigurationError(
-            f"Adapter {adapter!r} requires split.strategy={required_strategy}."
-        )
-    metadata_splits: dict[str, str] = {}
-    ratios: dict[str, float] = {}
-    if strategy == "official":
-        if "ratios" in split or split.get("official_file"):
-            raise ConfigurationError(
-                "Official CSV splits cannot be replaced by ratios or a signer allocation JSON."
-            )
-        sources = _mapping(dataset, "metadata_splits")
-        if set(sources) != {name.value for name in SplitName}:
-            raise ConfigurationError("metadata_splits must contain train, validation and test.")
-        metadata_splits = {name.value: _required_str(sources, name.value) for name in SplitName}
-        if len(set(metadata_splits.values())) != len(SplitName):
-            raise ConfigurationError("Each official split must use a different metadata file.")
-    else:
-        ratios_raw = _mapping(split, "ratios")
-        missing_ratios = [name.value for name in SplitName if name.value not in ratios_raw]
-        if missing_ratios:
-            raise ConfigurationError(f"Missing split ratios: {missing_ratios}.")
-        ratios = {name.value: float(ratios_raw[name.value]) for name in SplitName}
-        if abs(sum(ratios.values()) - 1.0) > 1e-9 or any(value <= 0 for value in ratios.values()):
-            raise ConfigurationError("Split ratios must be positive and sum to 1.0.")
+    if strategy != "signer_disjoint":
+        raise ConfigurationError("VSL400 requires split.strategy=signer_disjoint.")
+    ratios_raw = _mapping(split, "ratios")
+    missing_ratios = [name.value for name in SplitName if name.value not in ratios_raw]
+    if missing_ratios:
+        raise ConfigurationError(f"Missing split ratios: {missing_ratios}.")
+    ratios = {name.value: float(ratios_raw[name.value]) for name in SplitName}
+    if abs(sum(ratios.values()) - 1.0) > 1e-9 or any(value <= 0 for value in ratios.values()):
+        raise ConfigurationError("Split ratios must be positive and sum to 1.0.")
 
     extension = str(dataset.get("video_extension", ".mp4"))
     if not extension.startswith("."):
@@ -185,8 +155,6 @@ def load_dataset_config(
     official_value = split.get("official_file")
     return DatasetConfig(
         name=str(dataset.get("name", "vsl400")),
-        adapter=adapter,
-        metadata_splits=metadata_splits,
         root=root,
         video_extension=extension.lower(),
         gloss_file=_optional_string(dataset.get("gloss_file")),
@@ -209,7 +177,6 @@ def load_dataset_config(
             seed=int(split.get("seed", 42)),
             search_trials=search_trials,
             official_file=Path(str(official_value)) if official_value else None,
-            strategy=strategy,
         ),
         outputs=OutputConfig(
             manifest_csv=Path(_required_str(outputs, "manifest_csv")),

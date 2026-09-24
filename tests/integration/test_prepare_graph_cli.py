@@ -34,7 +34,7 @@ def test_prepare_graph_cli_writes_and_resumes_cache(tmp_path: Path) -> None:
     config.write_text(
         """schema_version: 1
 preprocessing:
-  layout_name: asl_citizen_coco_wholebody_v1
+  layout_name: coco_wholebody_75_v1
   target_frames: 8
   confidence_threshold: 0.3
   interpolation_max_gap: 1

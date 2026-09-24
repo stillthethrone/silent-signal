@@ -59,14 +59,8 @@ class _RawRecord:
 
 
 def build_manifest(config: DatasetConfig) -> ManifestBuildResult:
-    """Dispatch source parsing while preserving the shared manifest contract."""
+    """Parse VSL400 metadata into the shared manifest contract."""
 
-    if config.adapter == "asl_citizen":
-        from silent_signal.data.adapters.asl_citizen import build_asl_citizen_manifest
-
-        return build_asl_citizen_manifest(config)
-    if config.adapter != "vsl400":
-        raise ManifestError(f"Unsupported dataset adapter: {config.adapter!r}.")
     return _build_vsl400_manifest(config)
 
 

@@ -75,7 +75,7 @@ def test_extract_cli_writes_cache_report_and_resumes_current_result(
     tmp_path: Path,
     capsys,
 ) -> None:
-    dataset_root = tmp_path / "ASL_Citizen"
+    dataset_root = tmp_path / "dataset"
     video = dataset_root / "videos" / "clip.mp4"
     video.parent.mkdir(parents=True)
     video.write_bytes(b"video")
@@ -136,7 +136,7 @@ def test_extract_cli_writes_cache_report_and_resumes_current_result(
 
 
 def test_extract_cli_prints_live_resume_progress(tmp_path: Path, capsys) -> None:
-    dataset_root = tmp_path / "ASL_Citizen"
+    dataset_root = tmp_path / "dataset"
     video = dataset_root / "videos" / "clip.mp4"
     video.parent.mkdir(parents=True)
     video.write_bytes(b"video")
