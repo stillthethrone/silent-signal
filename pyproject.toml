@@ -5,13 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "silent-signal"
 version = "0.1.0"
-description = "Reproducible ASL Citizen and VSL400 sign-language research pipeline."
+description = "Reproducible Vietnamese sign-language research pipeline."
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { text = "Proprietary" }
 authors = [{ name = "Silent Signal contributors" }]
 dependencies = [
-  "numpy>=1.26,<2",
+  "numpy>=1.26,<3",
   "pyarrow>=18.0",
   "PyYAML>=6.0.2",
 ]
@@ -32,9 +32,9 @@ training = [
 silent-signal-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-prepare = "silent_signal.cli.prepare:entrypoint"
 ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
-ss-select-asl-subset = "silent_signal.cli.select_subset:entrypoint"
 ss-prepare-pose-graph = "silent_signal.cli.prepare_graph:entrypoint"
 ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
+ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]

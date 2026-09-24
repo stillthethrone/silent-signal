@@ -33,8 +33,6 @@ from silent_signal.preprocessing.pose_features import (
     preprocessing_fingerprint,
 )
 
-_DEFAULT_CONFIG = Path("configs/preprocessing/asl_citizen_graph.yaml")
-
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the graph-preparation CLI parser."""
@@ -43,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="ss-prepare-pose-graph",
         description="Prepare fixed graph tensors from versioned raw pose caches.",
     )
-    parser.add_argument("--config", type=Path, default=_DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--pose-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)

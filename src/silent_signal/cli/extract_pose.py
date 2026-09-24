@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from collections.abc import Sequence
 from dataclasses import replace
@@ -33,8 +32,6 @@ from silent_signal.pose.rtmpose import (
 )
 
 _DEFAULT_CONFIG = Path("configs/pose/rtmpose.yaml")
-_DEFAULT_MANIFEST = Path("data/manifests/asl_citizen.parquet")
-_DEFAULT_OUTPUT_ROOT = Path("data/processed/pose/asl_citizen/rtmpose_l_coco_wholebody_384x288/raw")
 _DEFAULT_REPORT = Path("artifacts/runs/pose-extraction/rtmpose_l_coco_wholebody_384x288.json")
 
 
@@ -68,13 +65,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Extract every selected valid manifest video into an atomic raw cache.",
     )
     extract.add_argument("--config", type=Path, default=_DEFAULT_CONFIG)
-    extract.add_argument("--manifest", type=Path, default=_DEFAULT_MANIFEST)
-    extract.add_argument(
-        "--dataset-root",
-        type=Path,
-        help="Dataset root; defaults to ASL_CITIZEN_ROOT.",
-    )
-    extract.add_argument("--output-root", type=Path, default=_DEFAULT_OUTPUT_ROOT)
+    extract.add_argument("--manifest", type=Path, required=True)
+    extract.add_argument("--dataset-root", type=Path, required=True)
+    extract.add_argument("--output-root", type=Path, required=True)
     extract.add_argument("--report", type=Path, default=_DEFAULT_REPORT)
     extract.add_argument(
         "--device",
@@ -376,12 +369,7 @@ def _validate_sequence(
         )
 
 
-def _dataset_root(value: Path | None) -> Path:
-    if value is None:
-        configured = os.environ.get("ASL_CITIZEN_ROOT")
-        if not configured:
-            raise ValueError("Set ASL_CITIZEN_ROOT or pass --dataset-root.")
-        value = Path(configured)
+def _dataset_root(value: Path) -> Path:
     root = value.expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"Dataset root does not exist: {root}")
