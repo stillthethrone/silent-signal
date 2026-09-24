@@ -25,7 +25,9 @@ def test_pose_notebook_keeps_official_split_and_videos_out_of_drive() -> None:
     assert "Etdihatthoc/Multi-VSL_WACV_2025" in source
     assert "'list-videos'" in source
     assert "'build'" in source
-    assert "VIDEO_ROOT = RUNTIME_ROOT / 'videos_center'" in source
+    assert "VIDEO_ROOT = RUNTIME_ROOT / 'videos'" in source
+    assert "VIEW_MODE = 'three_view'" in source
+    assert "'--views', VIEW_MODE" in source
     assert "RESULTS_ROOT = Path('/content/drive/MyDrive/" in source
     assert "md5Checksum" in source
     assert "'--split', 'train', '--limit', PILOT_LIMIT" in source

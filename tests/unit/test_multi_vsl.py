@@ -38,6 +38,32 @@ def _write_split(root: Path, split: str, signer: int, class_count: int = 4) -> N
                 )
 
 
+def _write_three_view(root: Path, split: str) -> None:
+    """Pair every center clip with left/right views, except one train clip (as upstream)."""
+
+    prefix = {"train": "train", "validation": "val", "test": "test"}[split]
+    with (root / f"{prefix}_1_200_center_ord1.csv").open(encoding="utf-8", newline="") as handle:
+        centers = [row for row in csv.DictReader(handle) if row["name"] != _UNPAIRED]
+    with (root / f"{prefix}_1_200_three_view_ord1.csv").open(
+        "w", encoding="utf-8", newline=""
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=["center", "left", "right", "label"])
+        writer.writeheader()
+        for row in centers:
+            name = row["name"]
+            writer.writerow(
+                {
+                    "center": name,
+                    "left": name.replace("_center_", "_left_"),
+                    "right": name.replace("_center_", "_right_"),
+                    "label": row["label"],
+                }
+            )
+
+
+_UNPAIRED = "sample_signer01_center_ord1_0_3_train.mp4"
+
+
 def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     metadata = tmp_path / "metadata"
     videos = tmp_path / "videos"
@@ -45,10 +71,12 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path]:
     videos.mkdir()
     for split, signer in (("train", 1), ("validation", 2), ("test", 3)):
         _write_split(metadata, split, signer)
-    for csv_path in metadata.glob("*.csv"):
+        _write_three_view(metadata, split)
+    for csv_path in metadata.glob("*_center_ord1.csv"):
         with csv_path.open("r", encoding="utf-8", newline="") as handle:
             for row in csv.DictReader(handle):
-                (videos / row["name"]).touch()
+                for view in ("center", "left", "right"):
+                    (videos / row["name"].replace("_center_", f"_{view}_")).touch()
     return metadata, videos
 
 
@@ -73,7 +101,7 @@ def test_prepare_multi_vsl_preserves_official_signer_splits(tmp_path: Path) -> N
 
 def test_prepare_multi_vsl_requires_every_selected_video(tmp_path: Path) -> None:
     metadata, videos = _fixture(tmp_path)
-    next(videos.glob("*train.mp4")).unlink()
+    next(videos.glob("*_center_*train.mp4")).unlink()
 
     with pytest.raises(FileNotFoundError, match="official videos"):
         prepare_multi_vsl(
@@ -151,7 +179,7 @@ def test_build_pose_dataset_writes_official_split_artifacts(tmp_path: Path) -> N
 
 def test_build_pose_dataset_marks_missing_and_empty_videos_invalid(tmp_path: Path) -> None:
     metadata, videos = _fixture(tmp_path)
-    files = sorted(videos.iterdir())
+    files = sorted(videos.glob("*_center_*"))
     for video in files[1:]:
         video.write_bytes(b"video")
     missing = next(path for path in files[1:] if "_0_0_" in path.name)
@@ -164,3 +192,46 @@ def test_build_pose_dataset_marks_missing_and_empty_videos_invalid(tmp_path: Pat
     report = dataset.validation.to_report()
     assert report["passed"] is False
     assert report["issue_counts"]["by_code"] == {"video_empty": 1, "video_missing": 1}
+
+
+def test_three_view_selection_keeps_center_ranking_and_groups_views(tmp_path: Path) -> None:
+    metadata, videos = _fixture(tmp_path)
+    for video in videos.iterdir():
+        video.write_bytes(b"video")
+
+    center = select_multi_vsl(metadata, class_count=3)
+    three = select_multi_vsl(metadata, class_count=3, view_mode="three_view")
+    records = multi_vsl_pose_records(three)
+
+    assert three.classes == center.classes
+    assert three.views == ("center", "left", "right")
+    center_ids = {r.sample_id for r in multi_vsl_pose_records(center)}
+    assert {r.sample_id for r in records if r.view == "center"} == center_ids - {
+        f"multi-vsl-train-0-3-{Path(_UNPAIRED).stem}"
+    }
+    by_instance: dict[str, set[str]] = {}
+    for record in records:
+        by_instance.setdefault(record.instance_id, set()).add(record.view)
+    assert set(map(frozenset, by_instance.values())) == {frozenset(three.views)}
+
+    dataset = build_multi_vsl_pose_dataset(
+        metadata_root=metadata,
+        video_root=videos,
+        output_root=tmp_path / "pose",
+        class_count=3,
+        view_mode="three_view",
+    )
+    assert not dataset.validation.has_errors
+    split = json.loads(dataset.split_path.read_text(encoding="utf-8"))
+    assert split["instance_counts"] == {"train": 8, "validation": 3, "test": 3}
+    assert split["clip_counts"] == {"train": 24, "validation": 9, "test": 9}
+
+
+def test_three_view_rejects_mismatched_signers(tmp_path: Path) -> None:
+    metadata, _videos = _fixture(tmp_path)
+    path = metadata / "val_1_200_three_view_ord1.csv"
+    text = path.read_text(encoding="utf-8").replace("sample_signer02_left", "sample_signer09_left")
+    path.write_text(text, encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="signers disagree"):
+        select_multi_vsl(metadata, class_count=3, view_mode="three_view")

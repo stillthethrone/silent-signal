@@ -1,4 +1,4 @@
-"""Build the Multi-VSL center-view manifest consumed by RTMPose extraction."""
+"""Build the Multi-VSL manifest consumed by RTMPose extraction."""
 
 from __future__ import annotations
 
@@ -20,18 +20,24 @@ def build_parser() -> argparse.ArgumentParser:
         "--metadata-root",
         type=Path,
         required=True,
-        help="Directory containing the official *_1_200_center_ord1.csv files.",
+        help="Directory containing the official *_1_200_center_ord1.csv and three-view files.",
     )
     common.add_argument(
         "--classes",
         type=int,
         default=50,
-        help="Top classes by official training clip count; 0 keeps every class.",
+        help="Top classes by official center training clip count; 0 keeps every class.",
+    )
+    common.add_argument(
+        "--views",
+        choices=("three_view", "center"),
+        default="three_view",
+        help="three_view keeps the official synchronized center/left/right triplets.",
     )
 
     parser = argparse.ArgumentParser(
         prog="ss-prepare-multi-vsl-pose",
-        description="Select official Multi-VSL center-view clips and write a pose manifest.",
+        description="Select official Multi-VSL clips and write a pose manifest.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -63,13 +69,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "list-videos":
-            selection = select_multi_vsl(args.metadata_root, args.classes)
+            selection = select_multi_vsl(args.metadata_root, args.classes, view_mode=args.views)
             names = selection.required_videos
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text("\n".join(names) + "\n", encoding="utf-8")
             _print_json(
                 {
                     "classes": len(selection.classes),
+                    "views": list(selection.views),
                     "videos": len(names),
                     "signers": selection.signer_splits,
                     "output": str(args.output.resolve()),
@@ -82,6 +89,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             video_root=args.video_root,
             output_root=args.output_root,
             class_count=args.classes,
+            view_mode=args.views,
             level=args.level,
             workers=args.workers,
         )

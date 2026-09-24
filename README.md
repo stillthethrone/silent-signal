@@ -63,21 +63,22 @@ gloss text; reports therefore use stable `VSL_NNN` display labels.
 ## Multi-VSL RTMPose extraction
 
 [Notebook 10](notebooks/10_multi_vsl_rtmpose_pose_extraction.ipynb) extracts
-RTMPose-L WholeBody keypoints for the same M-VSL200 center-view subset (top 50 by
-training clips by default, or all 199 classes). It keeps the official
-signer-disjoint split (20/4/4 signers; 1,100/199/197 clips for top 50), fetches
-only the required videos through the Drive API into the temporary runtime, and
-writes the manifest, split, raw pose caches and `[64, 75, 7]` graph tensors to
-Google Drive. Locally, the same selection is available as:
+RTMPose-L WholeBody keypoints for the same 50 M-VSL200 classes as the RGB
+baseline (or all 199), in all three synchronized views (center, left, right).
+It keeps the official signer-disjoint split (20/4/4 signers; 1,041/199/197
+recordings, 4,311 videos for the top 50), fetches only the required videos
+through the Drive API into the temporary runtime, and writes the manifest,
+split, class list, raw pose caches and `[64, 75, 7]` graph tensors to Google
+Drive. Locally, the same selection is available as:
 
 ```powershell
 uv run ss-prepare-multi-vsl-pose list-videos --metadata-root <repo>/data/label_1_200 --output required.txt
 uv run ss-prepare-multi-vsl-pose build --metadata-root <repo>/data/label_1_200 `
-  --video-root D:/datasets/Multi-VSL/center --output-root data/multi_vsl_pose --level probe
+  --video-root D:/datasets/Multi-VSL/videos --output-root data/multi_vsl_pose --level probe
 ```
 
 See [the Multi-VSL pose contract](docs/multi_vsl_pose.md) for the selection rule,
-split table, extraction steps and known limitations.
+the 50-class list, split table, extraction steps and known limitations.
 
 ## Implemented milestone: VSL400 preparation
 

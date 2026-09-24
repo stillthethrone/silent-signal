@@ -12,11 +12,8 @@ from silent_signal.data.manifest import read_manifest
 from silent_signal.pose.cache import pose_cache_path, sha256_file
 from silent_signal.pose.interface import RawPoseSequence
 
-_SPLITS = {
-    "train": ("train_1_200_center_ord1.csv", "01"),
-    "validation": ("val_1_200_center_ord1.csv", "02"),
-    "test": ("test_1_200_center_ord1.csv", "03"),
-}
+_SPLITS = {"train": ("train", "01"), "validation": ("val", "02"), "test": ("test", "03")}
+_VIEWS = ("center", "left", "right")
 
 
 class _FakeExtractor:
@@ -47,16 +44,31 @@ class _FakeExtractor:
 def _write_metadata(root: Path, videos: Path) -> None:
     root.mkdir()
     videos.mkdir()
-    for split, (filename, signer) in _SPLITS.items():
-        with (root / filename).open("w", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=["name", "label", "video_lb_id"])
-            writer.writeheader()
+    for split, (prefix, signer) in _SPLITS.items():
+        center_path = root / f"{prefix}_1_200_center_ord1.csv"
+        triplet_path = root / f"{prefix}_1_200_three_view_ord1.csv"
+        with (
+            center_path.open("w", encoding="utf-8", newline="") as center_handle,
+            triplet_path.open("w", encoding="utf-8", newline="") as triplet_handle,
+        ):
+            centers = csv.DictWriter(center_handle, fieldnames=["name", "label", "video_lb_id"])
+            triplets = csv.DictWriter(triplet_handle, fieldnames=[*_VIEWS, "label"])
+            centers.writeheader()
+            triplets.writeheader()
             for label in range(3):
                 copies = 3 - label if split == "train" else 1
                 for copy in range(copies):
-                    name = f"x_center_signer{signer}_center_ord1_{label}_{copy}_{split}.mp4"
-                    writer.writerow({"name": name, "label": label, "video_lb_id": name[-20:]})
-                    (videos / name).write_bytes(f"{split}-{label}-{copy}".encode())
+                    names = {
+                        view: f"x_{view}_signer{signer}_{view}_ord1_{label}_{copy}_{split}.mp4"
+                        for view in _VIEWS
+                    }
+                    lb_id = f"{split}-{label}-{copy}"
+                    centers.writerow(
+                        {"name": names["center"], "label": label, "video_lb_id": lb_id}
+                    )
+                    triplets.writerow({**names, "label": label})
+                    for name in names.values():
+                        (videos / name).write_bytes(name.encode())
 
 
 def _write_pose_config(path: Path) -> None:
@@ -89,7 +101,7 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
     required = tmp_path / "required.txt"
     common = ["--metadata-root", str(metadata), "--classes", "2"]
     assert prepare_multi_vsl_pose.main(["list-videos", *common, "--output", str(required)]) == 0
-    assert len(required.read_text(encoding="utf-8").split()) == 9
+    assert len(required.read_text(encoding="utf-8").split()) == 27
 
     assert (
         prepare_multi_vsl_pose.main(
@@ -99,7 +111,8 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
     )
     manifest = prepared / "manifest.csv"
     records = read_manifest(manifest)
-    assert len(records) == 9
+    assert len(records) == 27
+    assert {record.view for record in records} == set(_VIEWS)
 
     pose_config = tmp_path / "rtmpose.yaml"
     _write_pose_config(pose_config)
@@ -128,9 +141,9 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
     graph_config["expected"] = {
         "manifest_sha256": sha256_file(manifest),
         "extractor_fingerprint": _FakeExtractor.fingerprint,
-        "clips": 9,
+        "clips": 27,
         "classes": 2,
-        "splits": {"train": 5, "validation": 2, "test": 2},
+        "splits": {"train": 15, "validation": 6, "test": 6},
     }
     graph_config_path = tmp_path / "graph.yaml"
     graph_config_path.write_text(yaml.safe_dump(graph_config), encoding="utf-8")
@@ -151,5 +164,5 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
     ]
     assert prepare_graph.main(graph_args) == 0
     report = json.loads(graph_report.read_text(encoding="utf-8"))
-    assert report["prepared"] == 9
-    assert report["split_counts"] == {"train": 5, "validation": 2, "test": 2}
+    assert report["prepared"] == 27
+    assert report["split_counts"] == {"train": 15, "validation": 6, "test": 6}
