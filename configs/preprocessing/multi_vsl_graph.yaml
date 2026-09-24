@@ -1,0 +1,12 @@
+schema_version: 1
+
+# Multi-VSL center-view graph tensors. Notebook 10 copies this file and pins
+# `expected` (manifest SHA-256, extractor fingerprint, clip/class/split counts)
+# from the run it has just prepared.
+preprocessing:
+  layout_name: coco_wholebody_75_v1
+  target_frames: 64
+  confidence_threshold: 0.30
+  interpolation_max_gap: 3
+  include_velocity: true
+  include_bones: true

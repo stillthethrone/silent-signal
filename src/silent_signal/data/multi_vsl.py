@@ -1,8 +1,9 @@
-"""Prepare an official signer-disjoint Multi-VSL RGB baseline manifest."""
+"""Prepare official signer-disjoint Multi-VSL manifests for the RGB and pose pipelines."""
 
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 import re
 from collections import Counter, defaultdict
@@ -10,12 +11,30 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from silent_signal.configuration import ExpectedConfig
+from silent_signal.contracts import LabelDefinition, ManifestRecord, SplitDefinition
+from silent_signal.data.manifest import write_labels, write_manifest
+from silent_signal.data.splits import write_split_definition
+from silent_signal.data.validation import (
+    ValidationResult,
+    validate_manifest,
+    write_validation_report,
+)
+
 _SPLIT_FILES = {
     "train": "train_1_200_center_ord1.csv",
     "validation": "val_1_200_center_ord1.csv",
     "test": "test_1_200_center_ord1.csv",
 }
 _SIGNER_PATTERN = re.compile(r"_signer(\d+)_", re.IGNORECASE)
+_VIEW = "center"
+_DATASET_NAME = "Multi-VSL M-VSL200"
+_SELECTION_RULE = "classes ranked by official training clip count only"
+_SPLIT_POLICY = "official signer-disjoint train/validation/test split; never re-split"
+_CLASS_NAME_NOTE = (
+    "The public metadata contains numeric labels but no Vietnamese gloss text; "
+    "VSL_NNN is a stable display label for source label NNN-1."
+)
 
 
 @dataclass(frozen=True)
@@ -27,6 +46,16 @@ class MultiVSLPreparationResult:
     summary_path: Path
     selected_classes: tuple[int, ...]
     split_counts: dict[str, int]
+
+
+def _sample_id(row: dict[str, Any]) -> str:
+    """Shared RGB/pose sample key, so both branches can later be joined per clip."""
+
+    return f"multi-vsl-{row['video_lb_id']}-{Path(str(row['name'])).stem}"
+
+
+def _gloss_name(source_label: int) -> str:
+    return f"VSL_{source_label + 1:03d}"
 
 
 def _find_metadata_file(metadata_root: Path, filename: str) -> Path:
@@ -85,8 +114,10 @@ def _read_official_rows(metadata_root: Path) -> list[dict[str, Any]]:
 
 
 def _select_classes(rows: list[dict[str, Any]], class_count: int) -> tuple[int, ...]:
-    if class_count < 2:
-        raise ValueError("class_count must be at least 2.")
+    """Rank classes by training clips; ``class_count=0`` keeps every eligible class."""
+
+    if class_count == 1 or class_count < 0:
+        raise ValueError("class_count must be 0 (all classes) or at least 2.")
     counts: dict[int, Counter[str]] = defaultdict(Counter)
     for row in rows:
         counts[int(row["source_class_index"])][str(row["split"])] += 1
@@ -96,6 +127,8 @@ def _select_classes(rows: list[dict[str, Any]], class_count: int) -> tuple[int, 
         if all(split_counts[split] > 0 for split in _SPLIT_FILES)
     ]
     ranked = sorted(eligible, key=lambda value: (-counts[value]["train"], value))
+    if class_count == 0:
+        class_count = len(ranked)
     if len(ranked) < class_count:
         raise RuntimeError(
             f"Only {len(ranked)} classes occur in every official split; {class_count} requested."
@@ -164,13 +197,13 @@ def prepare_multi_vsl(
         path = videos[str(row["name"])]
         manifest_rows.append(
             {
-                "sample_id": f"multi-vsl-{row['video_lb_id']}-{path.stem}",
+                "sample_id": _sample_id(row),
                 "video_path": path.relative_to(video_root.resolve()).as_posix(),
-                "gloss_name": f"VSL_{source_class_index + 1:03d}",
+                "gloss_name": _gloss_name(source_class_index),
                 "class_index": source_class_index,
                 "split": row["split"],
                 "signer_id": row["signer_id"],
-                "view": "center",
+                "view": _VIEW,
                 "source_video_label_id": row["video_lb_id"],
             }
         )
@@ -192,7 +225,7 @@ def prepare_multi_vsl(
         {
             "rank": rank + 1,
             "subset_class_index": class_index,
-            "gloss_name": f"VSL_{class_index + 1:03d}",
+            "gloss_name": _gloss_name(class_index),
             "source_label": class_index,
             "counts": dict(class_split_counts[class_index]),
         }
@@ -202,14 +235,11 @@ def prepare_multi_vsl(
         selection_path,
         {
             "schema_version": 1,
-            "dataset_name": "Multi-VSL M-VSL200",
+            "dataset_name": _DATASET_NAME,
             "study_stage": f"center-view {class_count}-class RGB baseline",
-            "selection": "classes ranked by official training clip count only",
-            "split_policy": "official signer-disjoint train/validation/test split; never re-split",
-            "class_name_note": (
-                "The public metadata contains numeric labels but no Vietnamese gloss text; "
-                "VSL_NNN is a stable display label for source label NNN-1."
-            ),
+            "selection": _SELECTION_RULE,
+            "split_policy": _SPLIT_POLICY,
+            "class_name_note": _CLASS_NAME_NOTE,
             "classes": classes,
         },
     )
@@ -217,8 +247,8 @@ def prepare_multi_vsl(
         summary_path,
         {
             "schema_version": 1,
-            "dataset_name": "Multi-VSL M-VSL200",
-            "view": "center",
+            "dataset_name": _DATASET_NAME,
+            "view": _VIEW,
             "class_count": class_count,
             "selected_source_labels": list(selected_classes),
             "clips": dict(split_counts),
@@ -236,3 +266,176 @@ def prepare_multi_vsl(
         selected_classes=selected_classes,
         split_counts=dict(split_counts),
     )
+
+
+@dataclass(frozen=True)
+class MultiVSLSelection:
+    """Official center-view rows of the ranked classes, before any video is read."""
+
+    rows: tuple[dict[str, Any], ...]
+    classes: tuple[int, ...]
+    signer_splits: dict[str, list[str]]
+    source_files: dict[str, dict[str, str]]
+
+    @property
+    def required_videos(self) -> tuple[str, ...]:
+        """Official filenames the selected classes need, sorted for stable fetching."""
+
+        return tuple(sorted(str(row["name"]) for row in self.rows))
+
+
+@dataclass(frozen=True)
+class MultiVSLPoseDataset:
+    """Artifacts written by :func:`build_multi_vsl_pose_dataset`."""
+
+    manifest_csv: Path
+    manifest_parquet: Path
+    labels_path: Path
+    split_path: Path
+    selection_path: Path
+    report_path: Path
+    validation: ValidationResult
+
+
+def select_multi_vsl(metadata_root: Path, class_count: int = 50) -> MultiVSLSelection:
+    """Rank classes by training clips and keep their official split rows unchanged.
+
+    ``class_count=0`` keeps every class present in all three official splits.
+    """
+
+    root = metadata_root.resolve()
+    source_rows = _read_official_rows(root)
+    classes = _select_classes(source_rows, class_count)
+    selected = set(classes)
+    rows = tuple(row for row in source_rows if int(row["source_class_index"]) in selected)
+    source_files = {}
+    for split, filename in _SPLIT_FILES.items():
+        path = _find_metadata_file(root, filename)
+        source_files[split] = {
+            "path": path.relative_to(root).as_posix(),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+        }
+    return MultiVSLSelection(
+        rows=rows,
+        classes=classes,
+        signer_splits=_validate_signer_isolation(list(rows)),
+        source_files=source_files,
+    )
+
+
+def multi_vsl_pose_records(selection: MultiVSLSelection) -> tuple[ManifestRecord, ...]:
+    """Map selected rows to the shared manifest contract read by ``ss-extract-pose``.
+
+    Class indices follow the training-count rank (0 = most clips), matching the demo
+    class order used by the RGB baseline. Videos are addressed by their official
+    filename relative to one flat video directory.
+    """
+
+    class_index = {label: rank for rank, label in enumerate(selection.classes)}
+    records = []
+    for row in selection.rows:
+        label = int(row["source_class_index"])
+        sample_id = _sample_id(row)
+        records.append(
+            ManifestRecord(
+                sample_id=sample_id,
+                instance_id=sample_id,
+                video_id=str(row["name"]),
+                signer_id=str(row["signer_id"]),
+                gloss_id=str(label),
+                gloss_name=_gloss_name(label),
+                class_index=class_index[label],
+                view=_VIEW,
+                video_path=str(row["name"]),
+                split=str(row["split"]),
+            )
+        )
+    return tuple(sorted(records, key=lambda item: (item.class_index, item.sample_id)))
+
+
+def build_multi_vsl_pose_dataset(
+    *,
+    metadata_root: Path,
+    video_root: Path,
+    output_root: Path,
+    class_count: int = 50,
+    level: str = "metadata",
+    workers: int = 4,
+) -> MultiVSLPoseDataset:
+    """Validate local videos and write the manifest, labels and split used for pose work."""
+
+    selection = select_multi_vsl(metadata_root, class_count)
+    records = multi_vsl_pose_records(selection)
+    validation = validate_manifest(
+        records,
+        dataset_root=video_root,
+        expected=ExpectedConfig(views_per_instance=1),
+        expected_views=(_VIEW,),
+        level=level,
+        workers=workers,
+    )
+    records = validation.records
+    labels = tuple(
+        LabelDefinition(class_index=rank, gloss_id=str(label), gloss_name=_gloss_name(label))
+        for rank, label in enumerate(selection.classes)
+    )
+    splits = tuple(_SPLIT_FILES)
+    split_definition = SplitDefinition(
+        seed=None,
+        target_ratios={},
+        signer_ids={split: tuple(selection.signer_splits[split]) for split in splits},
+        signer_counts={split: len(selection.signer_splits[split]) for split in splits},
+        instance_counts={split: sum(item.split == split for item in records) for split in splits},
+        clip_counts={split: sum(item.split == split for item in records) for split in splits},
+        gloss_counts={
+            split: len({item.class_index for item in records if item.split == split})
+            for split in splits
+        },
+        score=None,
+        strategy="official",
+    )
+
+    output_root = output_root.resolve()
+    artifacts = MultiVSLPoseDataset(
+        manifest_csv=output_root / "manifest.csv",
+        manifest_parquet=output_root / "manifest.parquet",
+        labels_path=output_root / "labels.json",
+        split_path=output_root / "split.json",
+        selection_path=output_root / "selection.json",
+        report_path=output_root / "validation_report.json",
+        validation=validation,
+    )
+    write_manifest(records, artifacts.manifest_csv)
+    write_manifest(records, artifacts.manifest_parquet)
+    write_labels(labels, artifacts.labels_path, dataset="multi_vsl_m_vsl200_center")
+    write_split_definition(split_definition, artifacts.split_path)
+    write_validation_report(validation, artifacts.report_path)
+    counts: dict[int, Counter[str]] = defaultdict(Counter)
+    for record in records:
+        counts[record.class_index][str(record.split)] += 1
+    _write_json(
+        artifacts.selection_path,
+        {
+            "schema_version": 1,
+            "dataset_name": _DATASET_NAME,
+            "view": _VIEW,
+            "class_count": len(selection.classes),
+            "selection": _SELECTION_RULE,
+            "split_policy": _SPLIT_POLICY,
+            "class_name_note": _CLASS_NAME_NOTE,
+            "source_files": selection.source_files,
+            "clips": {split: split_definition.clip_counts[split] for split in splits},
+            "signers": selection.signer_splits,
+            "classes": [
+                {
+                    "rank": rank + 1,
+                    "class_index": rank,
+                    "source_label": label,
+                    "gloss_name": _gloss_name(label),
+                    "counts": {split: counts[rank][split] for split in splits},
+                }
+                for rank, label in enumerate(selection.classes)
+            ],
+        },
+    )
+    return artifacts

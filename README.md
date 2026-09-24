@@ -60,6 +60,25 @@ notebook validates required files before training rather than silently using a
 partial download. Public metadata exposes numeric labels but not Vietnamese
 gloss text; reports therefore use stable `VSL_NNN` display labels.
 
+## Multi-VSL RTMPose extraction
+
+[Notebook 10](notebooks/10_multi_vsl_rtmpose_pose_extraction.ipynb) extracts
+RTMPose-L WholeBody keypoints for the same M-VSL200 center-view subset (top 50 by
+training clips by default, or all 199 classes). It keeps the official
+signer-disjoint split (20/4/4 signers; 1,100/199/197 clips for top 50), fetches
+only the required videos through the Drive API into the temporary runtime, and
+writes the manifest, split, raw pose caches and `[64, 75, 7]` graph tensors to
+Google Drive. Locally, the same selection is available as:
+
+```powershell
+uv run ss-prepare-multi-vsl-pose list-videos --metadata-root <repo>/data/label_1_200 --output required.txt
+uv run ss-prepare-multi-vsl-pose build --metadata-root <repo>/data/label_1_200 `
+  --video-root D:/datasets/Multi-VSL/center --output-root data/multi_vsl_pose --level probe
+```
+
+See [the Multi-VSL pose contract](docs/multi_vsl_pose.md) for the selection rule,
+split table, extraction steps and known limitations.
+
 ## Implemented milestone: VSL400 preparation
 
 - Parse the three synchronized camera metadata files into one stable manifest.
