@@ -82,6 +82,23 @@ uv run ss-prepare-multi-vsl-pose build --metadata-root <repo>/data/label_1_200 `
 See [the Multi-VSL pose contract](docs/multi_vsl_pose.md) for the selection rule,
 the 50-class list, split table, extraction steps and known limitations.
 
+## VSL400 RTMPose extraction
+
+[Notebook 11](notebooks/11_vsl400_rtmpose_pose_extraction.ipynb) extracts
+RTMPose-L WholeBody keypoints for 50 VSL400 glosses in all three views. It reads
+the extracted release from Google Drive, builds the full 400-gloss manifest and
+the signer-disjoint 22/3/3 split first, then selects glosses by training
+recordings only (or an explicit `GLOSS_IDS` list) without re-splitting. Only the
+selected videos are copied into the runtime, re-validated with ffprobe and
+passed to `ss-extract-pose` and `ss-prepare-pose-graph`. The subset step is also
+available locally:
+
+```powershell
+uv run ss-select-classes --manifest data/manifests/vsl400.parquet --output-root data/subsets/vsl400_top50 --classes 50
+```
+
+See [the VSL400 pose contract](docs/vsl400_pose.md) for details.
+
 ## Implemented milestone: VSL400 preparation
 
 - Parse the three synchronized camera metadata files into one stable manifest.

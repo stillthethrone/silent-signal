@@ -1,37 +1,34 @@
 from __future__ import annotations
 
-import csv
 import json
+import shutil
 from pathlib import Path
 
 import numpy as np
 import yaml
 
-from silent_signal.cli import extract_pose, prepare_graph, prepare_multi_vsl_pose
+from silent_signal.cli import extract_pose, prepare, prepare_graph, select_classes
 from silent_signal.data.manifest import read_manifest
 from silent_signal.pose.cache import pose_cache_path, sha256_file
 from silent_signal.pose.interface import RawPoseSequence
-
-_SPLITS = {"train": ("train", "01"), "validation": ("val", "02"), "test": ("test", "03")}
-_VIEWS = ("center", "left", "right")
 
 
 class _FakeExtractor:
     fingerprint = "fake-rtmpose-v1"
 
     def extract_video(self, video_path: Path, *, sample_id: str) -> RawPoseSequence:
-        frames = 4
+        frames = 5
         return RawPoseSequence(
             sample_id=sample_id,
             source_video=str(video_path),
             frame_indices=np.arange(frames, dtype=np.int64),
-            timestamps_seconds=np.arange(frames, dtype=np.float64) / 30.0,
-            frame_size_hw=(720, 566),
-            keypoints_xy=np.random.default_rng(0)
-            .uniform(50, 500, (frames, 133, 2))
+            timestamps_seconds=np.arange(frames, dtype=np.float64) / 25.0,
+            frame_size_hw=(1080, 1080),
+            keypoints_xy=np.random.default_rng(1)
+            .uniform(100, 900, (frames, 133, 2))
             .astype(np.float32),
             keypoint_scores=np.full((frames, 133), 0.9, dtype=np.float32),
-            bboxes_xyxy=np.tile(np.asarray([10, 10, 550, 710], dtype=np.float32), (frames, 1)),
+            bboxes_xyxy=np.tile(np.asarray([50, 50, 1000, 1070], dtype=np.float32), (frames, 1)),
             bbox_scores=np.ones((frames,), dtype=np.float32),
             person_detected=np.ones((frames,), dtype=np.bool_),
             metadata={
@@ -41,37 +38,7 @@ class _FakeExtractor:
         )
 
 
-def _write_metadata(root: Path, videos: Path) -> None:
-    root.mkdir()
-    videos.mkdir()
-    for split, (prefix, signer) in _SPLITS.items():
-        center_path = root / f"{prefix}_1_200_center_ord1.csv"
-        triplet_path = root / f"{prefix}_1_200_three_view_ord1.csv"
-        with (
-            center_path.open("w", encoding="utf-8", newline="") as center_handle,
-            triplet_path.open("w", encoding="utf-8", newline="") as triplet_handle,
-        ):
-            centers = csv.DictWriter(center_handle, fieldnames=["name", "label", "video_lb_id"])
-            triplets = csv.DictWriter(triplet_handle, fieldnames=[*_VIEWS, "label"])
-            centers.writeheader()
-            triplets.writeheader()
-            for label in range(3):
-                copies = 3 - label if split == "train" else 1
-                for copy in range(copies):
-                    names = {
-                        view: f"x_{view}_signer{signer}_{view}_ord1_{label}_{copy}_{split}.mp4"
-                        for view in _VIEWS
-                    }
-                    lb_id = f"{split}-{label}-{copy}"
-                    centers.writerow(
-                        {"name": names["center"], "label": label, "video_lb_id": lb_id}
-                    )
-                    triplets.writerow({**names, "label": label})
-                    for name in names.values():
-                        (videos / name).write_bytes(name.encode())
-
-
-def _write_pose_config(path: Path) -> None:
+def _pose_config(path: Path) -> None:
     extractor = {
         "name": "rtmpose_l_coco_wholebody_384x288",
         "framework": "mmpose",
@@ -94,28 +61,60 @@ def _write_pose_config(path: Path) -> None:
     path.write_text(yaml.safe_dump({"schema_version": 1, "extractor": extractor}), "utf-8")
 
 
-def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path: Path) -> None:
-    metadata, videos, prepared = tmp_path / "metadata", tmp_path / "videos", tmp_path / "prepared"
-    _write_metadata(metadata, videos)
+def test_vsl400_subset_feeds_pose_extraction_and_graph_preparation(
+    config_file: Path, vsl400_root: Path, tmp_path: Path
+) -> None:
+    # 1. Full-dataset manifest and signer-disjoint split (notebook 00 / 11 step 1).
+    assert prepare.main(["all", "--config", str(config_file), "--level", "metadata"]) == 0
+    full_config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    full_manifest = Path(full_config["outputs"]["manifest_parquet"])
 
-    required = tmp_path / "required.txt"
-    common = ["--metadata-root", str(metadata), "--classes", "2"]
-    assert prepare_multi_vsl_pose.main(["list-videos", *common, "--output", str(required)]) == 0
-    assert len(required.read_text(encoding="utf-8").split()) == 27
-
+    # 2. Class subset that keeps the split.
+    prepared = tmp_path / "prepared"
     assert (
-        prepare_multi_vsl_pose.main(
-            ["build", *common, "--video-root", str(videos), "--output-root", str(prepared)]
+        select_classes.main(
+            ["--manifest", str(full_manifest), "--output-root", str(prepared), "--classes", "2"]
         )
         == 0
     )
+    selection = json.loads((prepared / "selection.json").read_text(encoding="utf-8"))
+    assert [item["gloss_name"] for item in selection["classes"]] == ["xin chào", "cảm ơn"]
+    assert selection["views"] == {"front": 32, "left": 32, "right": 32}
+
+    # 3. Copy only the required videos, keeping their relative paths.
+    local_root = tmp_path / "local"
+    for relative in (prepared / "required_videos.txt").read_text(encoding="utf-8").split():
+        destination = local_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(vsl400_root / relative, destination)
+
+    # 4. Re-validate the subset against the local copy with subset-specific counts.
+    runtime = dict(full_config)
+    runtime["dataset"] = {**full_config["dataset"], "root": str(local_root)}
+    runtime["expected"] = {
+        **full_config["expected"],
+        "clips": sum(selection["clips"].values()),
+        "glosses": selection["class_count"],
+    }
+    runtime["outputs"] = {
+        "manifest_csv": str(prepared / "manifest.csv"),
+        "manifest_parquet": str(prepared / "manifest.parquet"),
+        "labels": str(prepared / "labels.json"),
+        "split": str(prepared / "unused_split.json"),
+        "report": str(prepared / "validation_report.json"),
+        "invalid_records": str(prepared / "invalid_records.csv"),
+    }
+    runtime_config = tmp_path / "subset.yaml"
+    runtime_config.write_text(yaml.safe_dump(runtime, allow_unicode=True), encoding="utf-8")
+    validate_args = ["validate", "--config", str(runtime_config), "--level", "metadata"]
+    assert prepare.main([*validate_args, "--manifest", str(prepared / "manifest.parquet")]) == 0
     manifest = prepared / "manifest.csv"
     records = read_manifest(manifest)
-    assert len(records) == 27
-    assert {record.view for record in records} == set(_VIEWS)
+    assert len(records) == 96 and all(record.is_valid for record in records)
 
+    # 5. Pose extraction and graph preparation.
     pose_config = tmp_path / "rtmpose.yaml"
-    _write_pose_config(pose_config)
+    _pose_config(pose_config)
     raw_root = tmp_path / "raw"
     extract_args = [
         "extract",
@@ -124,7 +123,7 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
         "--manifest",
         str(manifest),
         "--dataset-root",
-        str(videos),
+        str(local_root),
         "--output-root",
         str(raw_root),
         "--report",
@@ -141,9 +140,9 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
     graph_config["expected"] = {
         "manifest_sha256": sha256_file(manifest),
         "extractor_fingerprint": _FakeExtractor.fingerprint,
-        "clips": 27,
+        "clips": 96,
         "classes": 2,
-        "splits": {"train": 15, "validation": 6, "test": 6},
+        "splits": selection["clips"],
     }
     graph_config_path = tmp_path / "graph.yaml"
     graph_config_path.write_text(yaml.safe_dump(graph_config), encoding="utf-8")
@@ -163,6 +162,4 @@ def test_multi_vsl_manifest_feeds_pose_extraction_and_graph_preparation(tmp_path
         "0",
     ]
     assert prepare_graph.main(graph_args) == 0
-    report = json.loads(graph_report.read_text(encoding="utf-8"))
-    assert report["prepared"] == 27
-    assert report["split_counts"] == {"train": 15, "validation": 6, "test": 6}
+    assert json.loads(graph_report.read_text(encoding="utf-8"))["prepared"] == 96

@@ -41,4 +41,4 @@ def test_pose_notebook_pins_rtmpose_environment_and_provenance() -> None:
         assert pin in source
     assert "checkpoint_sha256" in source
     assert "'extractor_fingerprint'" in source
-    assert "multi_vsl_graph.yaml" in source
+    assert "coco_wholebody_75_t64.yaml" in source

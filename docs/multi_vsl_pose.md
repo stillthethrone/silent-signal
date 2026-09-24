@@ -155,7 +155,7 @@ deterministically across runtimes.
 
 ## Graph tensors
 
-`configs/preprocessing/multi_vsl_graph.yaml` turns each raw sequence into `[64, 75, 7]`
+`configs/preprocessing/coco_wholebody_75_t64.yaml` turns each raw sequence into `[64, 75, 7]`
 features: layout `coco_wholebody_75_v1` (13 body, 2 × 21 hand, 20 face joints), confidence
 threshold 0.30, interpolation of gaps up to 3 frames, shoulder/hip normalization, uniform
 sampling to 64 frames, and channels x, y, confidence, velocity and bone vectors. Each view is
