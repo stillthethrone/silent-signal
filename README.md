@@ -1,59 +1,12 @@
 # Silent Signal
 
-Reproducible isolated sign-language recognition research with ASL Citizen
-(American Sign Language) and VSL400 (Vietnamese Sign Language). The implemented
-milestones prepare and validate data, import ASL Citizen's official splits,
-support VSL400 signer allocation, and provide reproducible offline whole-body
-pose extraction with explicit RTMDet and RTMPose-L 384x288 artifacts. The
-ASL Citizen top-200 path now includes graph preprocessing and a tested
-Graph-Spatial-Temporal Encoder smoke-training boundary; full epoch-level
-training and held-out evaluation remain future milestones.
-
-## ASL Citizen preparation
-
-The adapter reads the official release's `splits/train.csv`, `splits/val.csv`
-and `splits/test.csv`, preserving each video's filename, participant ID, gloss
-and split. It uses the 2,731 training glosses as class labels. `ASL-LEX Code`
-is retained as an optional annotation, not used as a unique class identifier.
-
-ASL Citizen Version 1.0 contains 83,399 videos from 52 signers:
-
-| Split | Videos | Signers |
-| --- | ---: | ---: |
-| Train | 40,154 | 35 |
-| Validation | 10,304 | 6 |
-| Test | 32,941 | 11 |
-
-These assignments are imported exactly, not regenerated from percentages.
-The pipeline rejects duplicate samples, signer leakage, missing split files,
-unseen evaluation labels and changes to the official manifest membership.
-File checks, FFmpeg validation and CSV/Parquet output are shared with VSL400.
-
-Expected release layout:
-
-```text
-ASL_Citizen/
-├── videos/
-├── splits/
-│   ├── train.csv
-│   ├── val.csv
-│   └── test.csv
-└── use.txt
-```
-
-Install once with `uv sync --extra dev`, then prepare the extracted dataset:
-
-```powershell
-uv run ss-prepare all --config configs/dataset/asl_citizen.yaml --root C:/datasets/ASL_Citizen --level metadata
-uv run ss-prepare all --config configs/dataset/asl_citizen.yaml --root C:/datasets/ASL_Citizen --level probe --workers 4
-```
-
-Alternatively set `ASL_CITIZEN_ROOT` and omit `--root`. The command writes
-`data/manifests/asl_citizen.csv` and `.parquet`,
-`data/labels/asl_citizen_labels.json`, `data/splits/asl_citizen_official.json`,
-and validation reports under `artifacts/runs/asl-citizen-preparation/`.
-Always check the command exit code and report `passed`; global count errors
-can occur even if every individual row has `is_valid=true`.
+Reproducible isolated Vietnamese Sign Language (VSL) recognition research on
+VSL400. The implemented milestones prepare and validate VSL400 with
+signer-disjoint splits, select gloss subsets without re-splitting, and provide
+reproducible offline whole-body pose extraction with explicit RTMDet and
+RTMPose-L 384x288 artifacts, in all three camera views. A pose graph preprocessing stage and a tested
+Graph-Spatial-Temporal Encoder smoke-training boundary are available; full
+epoch-level pose training and held-out evaluation remain future milestones.
 
 ## RTMPose-L WholeBody extraction
 
@@ -69,70 +22,40 @@ Verify the local config/checkpoint files and calculate their full SHA-256 values
 uv run ss-extract-pose verify --config configs/pose/rtmpose.yaml
 ```
 
-Then run a small ASL Citizen pilot:
+Then run a small pilot on a prepared manifest:
 
 ```powershell
 uv run ss-extract-pose extract --config configs/pose/rtmpose.yaml `
-  --manifest data/manifests/asl_citizen.parquet `
-  --dataset-root D:/datasets/ASL_Citizen --split train --limit 100
+  --manifest data/manifests/vsl400.parquet `
+  --dataset-root D:/datasets/VSL400 `
+  --output-root data/processed/pose/vsl400/rtmpose_l_coco_wholebody_384x288/raw `
+  --split train --limit 100
 ```
 
 See [the extraction contract and environment guide](docs/pose_extraction.md)
 before downloading models or starting a production run.
 
-For Google Colab, open
-[00_asl_citizen_colab_preparation.ipynb](notebooks/00_asl_citizen_colab_preparation.ipynb).
-After data validation passes, use
-[03_rtmpose_wholebody_colab_check.ipynb](notebooks/03_rtmpose_wholebody_colab_check.ipynb)
-to optionally stream-extract the full official ZIP directly from Microsoft,
-verify the pinned OpenMMLab environment, download and hash the explicit
-RTMDet-M/RTMPose-L artifacts, extract a smoke sample, inspect its raw 133-point
-cache and validate resume behavior. It can also be opened directly in
-[Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/dev/notebooks/03_rtmpose_wholebody_colab_check.ipynb)
-after the notebook has been pushed to the `dev` branch.
-It clones the project's `dev` branch, downloads the official ZIP when enabled,
-checks extraction space, imports the official CSVs, and stores preparation
-outputs and resumable validation progress in Drive. Push this implementation
-to the selected branch before running it. No Zenodo token is needed.
+Raw pose caches can then be converted into `[64, 75, 7]` graph tensors with
+`ss-prepare-pose-graph` and checked with `ss-check-graph-encoder`. Both take an
+explicit `--config`; see the [graph preprocessing](docs/graph_preprocessing.md)
+and [graph encoder](docs/graph_encoder.md) contracts.
 
-To extract pose only for the 200 ASL Citizen classes with the highest ASL-LEX
-2.0 subjective conversational-frequency ratings, use
-[04_asl_citizen_top200_pose_extraction.ipynb](notebooks/04_asl_citizen_top200_pose_extraction.ipynb).
-It is standalone: on a fresh GPU runtime it can stream-extract ASL Citizen, build
-the official manifest, create the pinned OpenMMLab environment, download models,
-select the subset and extract pose without running notebooks `00` or `03`. It
-preserves the official splits and all clips in each selected class; it does not
-rank words by ASL Citizen video count. See the
-[top-200 selection contract](docs/asl_citizen_top200.md) for the exact rule,
-outputs, source, license, and limitations.
+## VSL400 RTMPose extraction
 
-After all 6,146 raw pose caches pass extraction, run
-[05_asl_citizen_top200_graph_preparation.ipynb](notebooks/05_asl_citizen_top200_graph_preparation.ipynb).
-It converts raw 133-keypoint sequences into resumable `[64, 75, 7]` graph tensors on Drive
-without reading videos or using a GPU. The configuration pins the completed manifest and
-extractor fingerprints and preserves the official splits. See the
-[graph preprocessing contract](docs/graph_preprocessing.md) for the feature, mask,
-normalization, and cache definitions.
+[Notebook 11](notebooks/11_vsl400_rtmpose_pose_extraction.ipynb) extracts
+RTMPose-L WholeBody keypoints for 50 VSL400 glosses in all three views. It reads
+the extracted release from Google Drive, builds the full 400-gloss manifest and
+the signer-disjoint 22/3/3 split first, then selects glosses by training
+recordings only (or an explicit `GLOSS_IDS` list) without re-splitting. Only the
+selected videos are copied into the runtime, re-validated with ffprobe and
+passed to `ss-extract-pose` and `ss-prepare-pose-graph`. The subset step is also
+available locally:
 
-After graph preparation passes, use
-[06_asl_citizen_top200_graph_encoder_check.ipynb](notebooks/06_asl_citizen_top200_graph_encoder_check.ipynb)
-to validate the mask-aware Graph-Spatial-Temporal Encoder, its 200-class head, backward pass,
-optimizer step and atomic smoke checkpoint. This check is not full multi-epoch training; see
-the [graph encoder contract](docs/graph_encoder.md).
+```powershell
+uv run ss-select-classes --manifest data/manifests/vsl400.parquet --output-root data/subsets/vsl400_top50 --classes 50
+```
 
-The Microsoft Download Center labels the ZIP as 42.8 GB. Archive plus extracted
-files need roughly 89 GiB together, before extra working space or pose caches;
-check the actual Colab disk quota before downloading. See the notebook and
-[ASL Citizen implementation notes](docs/asl_citizen.md) for provenance, workflow
-and resource requirements.
-
-ASL Citizen is available under
-[Microsoft's research dataset license](https://www.microsoft.com/en-us/research/project/asl-citizen/dataset-license/)
-for non-commercial, non-revenue-generating research, with restrictions on
-redistribution. Download it from the
-[official project page](https://www.microsoft.com/en-us/research/project/asl-citizen/).
-An ASL-trained recognizer is not a Vietnamese sign-language recognizer;
-transfer to VSL requires separate training and evaluation.
+See [the VSL400 pose contract](docs/vsl400_pose.md) for details.
 
 ## Implemented milestone: VSL400 preparation
 

@@ -25,7 +25,7 @@ FEATURE_NAMES = ("x", "y", "confidence", "velocity_x", "velocity_y", "bone_x", "
 class GraphPreprocessConfig:
     """Versioned preprocessing choices that determine graph-cache identity."""
 
-    layout_name: str = "asl_citizen_coco_wholebody_v1"
+    layout_name: str = "coco_wholebody_75_v1"
     target_frames: int = 64
     confidence_threshold: float = 0.3
     interpolation_max_gap: int = 3

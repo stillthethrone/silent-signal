@@ -1,6 +1,6 @@
 schema_version: 1
 
-# Production offline extractor for ASL Citizen. MMPose is the framework;
+# Production offline whole-body extractor. MMPose is the framework;
 # RTMPose-L is the explicit top-down whole-body pose model. Do not replace
 # these paths with the mutable MMPose alias "wholebody".
 extractor:
