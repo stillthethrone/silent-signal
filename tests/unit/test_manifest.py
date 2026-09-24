@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -55,3 +56,20 @@ def test_discovers_legacy_camera_aliases(dataset_config: DatasetConfig) -> None:
         "left": "cam_2",
         "right": "cam_3",
     }
+
+
+def test_reads_manifest_with_legacy_asl_lex_code_column(
+    dataset_config: DatasetConfig, tmp_path: Path
+) -> None:
+    records = build_manifest(dataset_config).records
+    source = tmp_path / "current.csv"
+    write_manifest(records, source)
+    with source.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
+    legacy = tmp_path / "legacy.csv"
+    with legacy.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=[*rows[0], "asl_lex_code"])
+        writer.writeheader()
+        writer.writerows({**row, "asl_lex_code": ""} for row in rows)
+
+    assert read_manifest(legacy) == records

@@ -797,7 +797,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "class_index": class_index,
                 "source_subset_class_index": int(item["source_subset_class_index"]),
                 "gloss_name": item["gloss_name"],
-                "sign_frequency_mean": item.get("sign_frequency_mean"),
                 "counts": counts,
                 "percentages": {
                     split: round(count / total * 100, 2) for split, count in counts.items()
@@ -806,7 +805,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     selection_payload = {
         "schema_version": 1,
-        "dataset_name": source_selection.get("dataset_name", "ASL Citizen"),
+        "dataset_name": source_selection.get("dataset_name", "unspecified"),
         "warning": source_selection.get(
             "warning",
             f"DEMO {args.classes} classes; compare only runs using the same data contract.",
@@ -1141,7 +1140,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "schema_version": 1,
         "state": "passed",
         "created_utc": datetime.now(UTC).isoformat(),
-        "dataset_name": source_selection.get("dataset_name", "ASL Citizen"),
+        "dataset_name": source_selection.get("dataset_name", "unspecified"),
         "study_stage": source_selection.get(
             "study_stage", f"complete-data {args.classes}-class RGB-only demo"
         ),

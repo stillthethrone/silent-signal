@@ -1,4 +1,4 @@
-"""Smoke-train and validate the ASL Citizen top-200 graph encoder."""
+"""Smoke-train and validate the pose graph encoder."""
 
 from __future__ import annotations
 
@@ -29,15 +29,13 @@ from silent_signal.models.factory import (
 from silent_signal.pose.cache import sha256_file, write_json_atomic
 from silent_signal.training.checkpoint import write_torch_checkpoint_atomic
 
-_DEFAULT_CONFIG = Path("configs/model/asl_citizen_graph_encoder.yaml")
-
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ss-check-graph-encoder",
         description="Validate graph caches with a forward/backward smoke training run.",
     )
-    parser.add_argument("--config", type=Path, default=_DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--graph-root", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
@@ -62,7 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         manifest_sha256 = sha256_file(manifest_path)
         if manifest_sha256 != experiment.manifest_sha256:
             raise ValueError("Manifest SHA-256 does not match the graph encoder experiment config.")
-        _log("setup", "reading official manifest and selecting train samples")
+        _log("setup", "reading manifest and selecting train samples")
         records = tuple(
             sorted(
                 (record for record in read_manifest(manifest_path) if record.split == "train"),

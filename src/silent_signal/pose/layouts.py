@@ -186,7 +186,7 @@ def _hand_parent(local_index: int, hand_offset: int, body_wrist: int) -> int:
     return hand_offset + local_index - 1
 
 
-def _build_asl_layout() -> PoseLayout:
+def _build_wholebody_75_layout() -> PoseLayout:
     joints: list[JointDefinition] = []
     body_parents: tuple[int | None, ...] = (
         None,
@@ -272,15 +272,15 @@ def _build_asl_layout() -> PoseLayout:
         }
     )
     return PoseLayout(
-        name="asl_citizen_coco_wholebody_v1",
+        name="coco_wholebody_75_v1",
         source_layout="coco_wholebody_133",
         joints=tuple(joints),
         edges=tuple(sorted(parent_edges)),
     )
 
 
-ASL_CITIZEN_WHOLEBODY_V1: Final = _build_asl_layout()
-POSE_LAYOUTS: Final = MappingProxyType({ASL_CITIZEN_WHOLEBODY_V1.name: ASL_CITIZEN_WHOLEBODY_V1})
+COCO_WHOLEBODY_75_V1: Final = _build_wholebody_75_layout()
+POSE_LAYOUTS: Final = MappingProxyType({COCO_WHOLEBODY_75_V1.name: COCO_WHOLEBODY_75_V1})
 
 
 def get_pose_layout(name: str) -> PoseLayout:

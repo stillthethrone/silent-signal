@@ -1,9 +1,8 @@
-"""Command line workflow for ASL Citizen and VSL400 data preparation."""
+"""Command line workflow for VSL400 data preparation."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import sys
 from collections.abc import Sequence
@@ -24,7 +23,6 @@ from silent_signal.data.splits import (
     SplitError,
     create_signer_disjoint_split,
     load_signer_allocation,
-    verify_official_split,
     write_split_definition,
 )
 from silent_signal.data.validation import (
@@ -55,7 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     parser = argparse.ArgumentParser(
         prog="ss-prepare",
-        description="Prepare and validate ASL Citizen or VSL400 without extracting pose.",
+        description="Prepare and validate VSL400 without extracting pose.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -82,7 +80,7 @@ def build_parser() -> argparse.ArgumentParser:
     split_parser.add_argument(
         "--official-split",
         type=Path,
-        help="VSL400 signer allocation JSON; not applicable to ASL Citizen's official CSVs.",
+        help="Official VSL400 signer allocation JSON.",
     )
     split_parser.add_argument(
         "--allow-invalid",
@@ -106,7 +104,7 @@ def build_parser() -> argparse.ArgumentParser:
     all_parser.add_argument(
         "--official-split",
         type=Path,
-        help="VSL400 signer allocation JSON; not applicable to ASL Citizen's official CSVs.",
+        help="Official VSL400 signer allocation JSON.",
     )
     all_parser.add_argument(
         "--allow-invalid",
@@ -123,8 +121,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = load_dataset_config(args.config, root_override=args.root)
-        if config.split.strategy == "official" and getattr(args, "official_split", None):
-            raise SplitError("ASL Citizen's official CSV splits cannot be overridden by JSON.")
         if args.command == "build-manifest":
             build = build_manifest(config)
             _write_build_artifacts(build, config)
@@ -218,20 +214,6 @@ def _split(
     *,
     official_path: Path | None,
 ) -> tuple[tuple[ManifestRecord, ...], SplitDefinition]:
-    if config.split.strategy == "official":
-        if official_path is not None:
-            raise SplitError("Official CSV splits cannot be overridden by a signer allocation.")
-        source = build_manifest(config)
-        source_files = {
-            split: {
-                "path": path,
-                "sha256": hashlib.sha256((config.root / path).read_bytes()).hexdigest(),
-            }
-            for split, path in source.source_metadata.items()
-        }
-        return verify_official_split(
-            records, source_records=source.records, source_files=source_files
-        )
     allocation: dict[str, tuple[str, ...]] | None = None
     selected_official = official_path
     if selected_official is None and config.split.official_file is not None:

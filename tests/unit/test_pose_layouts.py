@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import numpy as np
 
-from silent_signal.pose.layouts import ASL_CITIZEN_WHOLEBODY_V1
+from silent_signal.pose.layouts import COCO_WHOLEBODY_75_V1
 
 
-def test_asl_layout_is_a_stable_75_joint_coco_wholebody_subset() -> None:
-    layout = ASL_CITIZEN_WHOLEBODY_V1
+def test_layout_is_a_stable_75_joint_coco_wholebody_subset() -> None:
+    layout = COCO_WHOLEBODY_75_V1
 
-    assert layout.name == "asl_citizen_coco_wholebody_v1"
+    assert layout.name == "coco_wholebody_75_v1"
     assert layout.source_layout == "coco_wholebody_133"
     assert layout.num_joints == 75
     assert len(set(layout.source_indices)) == 75
@@ -21,7 +21,7 @@ def test_asl_layout_is_a_stable_75_joint_coco_wholebody_subset() -> None:
 
 
 def test_layout_selects_matching_coordinates_and_scores() -> None:
-    layout = ASL_CITIZEN_WHOLEBODY_V1
+    layout = COCO_WHOLEBODY_75_V1
     xy = np.arange(2 * 133 * 2, dtype=np.float32).reshape(2, 133, 2)
     scores = np.arange(2 * 133, dtype=np.float32).reshape(2, 133)
 
