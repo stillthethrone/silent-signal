@@ -1,11 +1,10 @@
 # Silent Signal
 
-Reproducible isolated Vietnamese Sign Language (VSL) recognition research with
-VSL400 and Multi-VSL. The implemented milestones prepare and validate VSL400
-with signer-disjoint splits, train a frozen VideoMAE V2 + RGB Transformer
-baseline on the official Multi-VSL M-VSL200 split, and provide reproducible
-offline whole-body pose extraction with explicit RTMDet and RTMPose-L 384x288
-artifacts. A pose graph preprocessing stage and a tested
+Reproducible isolated Vietnamese Sign Language (VSL) recognition research on
+VSL400. The implemented milestones prepare and validate VSL400 with
+signer-disjoint splits, select gloss subsets without re-splitting, and provide
+reproducible offline whole-body pose extraction with explicit RTMDet and
+RTMPose-L 384x288 artifacts, in all three camera views. A pose graph preprocessing stage and a tested
 Graph-Spatial-Temporal Encoder smoke-training boundary are available; full
 epoch-level pose training and held-out evaluation remain future milestones.
 
@@ -40,47 +39,6 @@ Raw pose caches can then be converted into `[64, 75, 7]` graph tensors with
 `ss-prepare-pose-graph` and checked with `ss-check-graph-encoder`. Both take an
 explicit `--config`; see the [graph preprocessing](docs/graph_preprocessing.md)
 and [graph encoder](docs/graph_encoder.md) contracts.
-
-## Multi-VSL Vietnamese baseline
-
-The standalone
-[Multi-VSL 50-class RGB baseline notebook](notebooks/09_multi_vsl_top50_videomaev2_rgb_transformer_baseline.ipynb)
-uses the official M-VSL200 center-view metadata and keeps its signer-disjoint
-train/validation/test assignment. It ranks eligible classes using training-set
-clip counts only, verifies every selected official video, freezes VideoMAE V2,
-and trains a compact 64-dimensional RGB Transformer with early stopping.
-Source videos remain in the temporary Colab runtime; only reproducibility
-manifests, logs, checkpoints, predictions, reports, and figures are saved to
-Google Drive.
-
-Open it in
-[Google Colab](https://colab.research.google.com/github/stillthethrone/silent-signal/blob/feat/multi-vsl-baseline/notebooks/09_multi_vsl_top50_videomaev2_rgb_transformer_baseline.ipynb).
-The Drive folder linked by the authors holds only a 1,000-video sample (20 of
-the 1,496 clips this baseline needs), so the full release must be requested
-from the authors; the notebook validates required files before training rather
-than silently using a partial download. Public metadata exposes numeric labels but not Vietnamese
-gloss text; reports therefore use stable `VSL_NNN` display labels.
-
-## Multi-VSL RTMPose extraction
-
-[Notebook 10](notebooks/10_multi_vsl_rtmpose_pose_extraction.ipynb) extracts
-RTMPose-L WholeBody keypoints for the same 50 M-VSL200 classes as the RGB
-baseline (or all 199), in all three synchronized views (center, left, right).
-It keeps the official signer-disjoint split (20/4/4 signers; 1,041/199/197
-recordings, 4,311 videos for the top 50), copies only the required videos
-from the full release (the public Drive sample is not enough) into the
-temporary runtime, and writes the manifest,
-split, class list, raw pose caches and `[64, 75, 7]` graph tensors to Google
-Drive. Locally, the same selection is available as:
-
-```powershell
-uv run ss-prepare-multi-vsl-pose list-videos --metadata-root <repo>/data/label_1_200 --output required.txt
-uv run ss-prepare-multi-vsl-pose build --metadata-root <repo>/data/label_1_200 `
-  --video-root D:/datasets/Multi-VSL/videos --output-root data/multi_vsl_pose --level probe
-```
-
-See [the Multi-VSL pose contract](docs/multi_vsl_pose.md) for the selection rule,
-the 50-class list, split table, extraction steps and known limitations.
 
 ## VSL400 RTMPose extraction
 

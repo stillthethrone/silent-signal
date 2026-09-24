@@ -53,11 +53,28 @@ written back to the subset manifest.
 
 ## Pose extraction and graph tensors
 
-Identical to the [Multi-VSL pipeline](multi_vsl_pose.md#pose-extraction): RTMDet-M person
-boxes (score ≥ 0.30), signer selection by score, centrality, area and temporal IoU, a 1.2×
-box, RTMPose-L 384×288 on every frame, atomic pickle-free NPZ caches with model, library and
-source-video provenance, deterministic sharding, and `[64, 75, 7]` graph tensors from
-`configs/preprocessing/coco_wholebody_75_t64.yaml`. Each view is a separate graph sample.
+`ss-extract-pose extract` processes every decoded frame of every video, independently per
+view:
+
+1. RTMDet-M detects person boxes; boxes scoring below 0.30 are dropped.
+2. The signer box is chosen by detector score, centrality, area and IoU with the previous
+   frame's box.
+3. The box is enlarged 1.2× and clipped to the frame so extended hands stay inside.
+4. RTMPose-L 384×288 (COCO-WholeBody) predicts 133 keypoints with scores.
+5. Frames without a person are stored as zeros with `person_detected = false`.
+
+Each clip becomes one atomic, pickle-free NPZ with pixel coordinates, scores, boxes, frame
+indices, timestamps and provenance (model SHA-256, library versions, source-video SHA-256).
+A cache is reused only if its sample ID, video hash and extractor fingerprint match, and a
+clip fails if its decoded frame count or size differs from the probed manifest. Sharding
+(`--num-shards`, `--shard-index`) splits the work deterministically across runtimes.
+
+`configs/preprocessing/coco_wholebody_75_t64.yaml` then turns each raw sequence into
+`[64, 75, 7]` features: layout `coco_wholebody_75_v1` (13 body, 2 × 21 hand, 20 face
+joints), confidence threshold 0.30, interpolation of gaps up to 3 frames, shoulder/hip
+normalization, uniform sampling to 64 frames, and channels x, y, confidence, velocity and
+bone vectors. Each view is a separate graph sample; group them by `instance_id` for
+multi-view models.
 
 ## Verification status
 

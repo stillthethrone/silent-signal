@@ -18,12 +18,6 @@ top-1, top-5 and top-10 accuracy (recall@K for one correct gloss per query).
 MRR may supplement these for ranking analysis. Training/evaluation modules
 are currently scaffolding, not an implemented benchmark reproduction.
 
-## Multi-VSL M-VSL200
-
-Use the official center-view train/validation/test CSVs unchanged. The
-50-class baseline ranks classes by training clip count only; validation and
-test labels are used solely to require coverage.
-
 ## VSL400
 
 Existing VSL400 signer-disjoint search remains available through its separate

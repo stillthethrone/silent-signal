@@ -1,9 +1,8 @@
 schema_version: 1
 
-# [64, 75, 7] graph tensors shared by the Multi-VSL (notebook 10) and VSL400
-# (notebook 11) pose pipelines. The notebooks copy this file and pin `expected`
-# (manifest SHA-256, extractor fingerprint, clip/class/split counts) from the
-# run they have just prepared.
+# [64, 75, 7] graph tensors for the VSL400 pose pipeline. Notebook 11 copies
+# this file and pins `expected` (manifest SHA-256, extractor fingerprint,
+# clip/class/split counts) from the run it has just prepared.
 preprocessing:
   layout_name: coco_wholebody_75_v1
   target_frames: 64

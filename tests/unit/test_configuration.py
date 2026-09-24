@@ -38,7 +38,7 @@ def test_rejects_non_disjoint_split_strategy(
 
 def test_rejects_unsupported_dataset_adapter(config_file: Path) -> None:
     payload = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-    payload["dataset"]["adapter"] = "asl_citizen"
+    payload["dataset"]["adapter"] = "other_dataset"
     config_file.write_text(yaml.safe_dump(payload), encoding="utf-8")
 
     with pytest.raises(ConfigurationError, match="Unsupported dataset adapter"):
