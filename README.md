@@ -44,7 +44,9 @@ and [graph encoder](docs/graph_encoder.md) contracts.
 
 [Notebook 11](notebooks/11_vsl400_rtmpose_pose_extraction.ipynb) extracts
 RTMPose-L WholeBody keypoints for 50 VSL400 glosses in all three views. It reads
-the extracted release from Google Drive, builds the full 400-gloss manifest and
+either the Kaggle redistribution (range-reading only the metadata and the
+selected videos out of its ~75 GB ZIP, after you confirm permission to use it)
+or an extracted release on Google Drive, builds the full 400-gloss manifest and
 the signer-disjoint 22/3/3 split first, then selects glosses by training
 recordings only (or an explicit `GLOSS_IDS` list) without re-splitting. Only the
 selected videos are copied into the runtime, re-validated with ffprobe and

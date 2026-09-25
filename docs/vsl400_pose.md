@@ -13,6 +13,31 @@ clips, 400 glosses, 28 signers, three views per recording, 25 fps and 1080 × 10
 Multi-VSL, `gloss.csv` provides the Vietnamese gloss text, so the class list carries real
 words.
 
+## Kaggle source
+
+`DATA_SOURCE = 'kaggle'` (the notebook default) reads the Kaggle dataset
+[`nguyenanfms/vsl-vietnamese-sign-language-v2`](https://www.kaggle.com/datasets/nguyenanfms/vsl-vietnamese-sign-language-v2),
+pinned to version 8 (2026-06-18). Kaggle serves it as one ~75 GB ZIP whose
+`raw/raw/VSL400/Part_1..7/` folders hold the seven VSL400 release parts (three views and
+per-view JSONs each), next to derived cropped clips and MediaPipe keypoints that this
+pipeline ignores.
+
+`ss-fetch-vsl400-kaggle` never downloads the whole ZIP. Kaggle credentials
+(`KAGGLE_USERNAME`/`KAGGLE_KEY`, from Colab Secrets) are sent only to Kaggle, which redirects
+to a short-lived signed storage URL; expired URLs are renewed automatically.
+
+- `metadata` reads the central directory, extracts the 21 view JSONs and merges them like
+  the authors' `merge_splits.py` (duplicate `video_id`s are rejected), producing a metadata-only
+  root for `ss-prepare build-manifest` and `create-splits`.
+- `videos` fetches the exact byte range of each listed `<view>/<id>.mp4`, decompresses it,
+  checks size and CRC-32 and publishes it atomically. Reruns skip matching files, and the
+  archive size/ETag are pinned so two versions are never mixed in one folder.
+
+**Provenance.** This is a third-party redistribution. The Zenodo record lists CC BY 4.0, but
+the VSL400 maintainers now gate video access behind a Data Usage Agreement. The notebook
+refuses to use the Kaggle source until `CONFIRM_KAGGLE_VSL400_PERMISSION = True`; confirm your
+right to use this copy with the maintainers first.
+
 ## Split
 
 VSL400 has no official split. `ss-prepare all` assigns whole signers 80/10/10 over the
@@ -80,5 +105,9 @@ multi-view models.
 
 Local tests run the whole chain (full manifest and split, subset, copy, validation, pose
 extraction with a fake extractor, graph preparation) on a synthetic three-view VSL400
-release. The Drive copy, ffprobe values of the real release and the RTMPose run itself are
-verified only on Colab.
+release, and the Kaggle reader against a local server that requires credentials, redirects
+to an expiring signed URL, and serves byte ranges of a Kaggle-shaped ZIP. The real Kaggle
+archive layout inside `Part_*` (only its top-level folders are documented), the Drive copy,
+ffprobe values of the real release and the RTMPose run are verified only on Colab. The
+metadata reports `"resolution": 1080`; the subset validation therefore records the measured
+frame size instead of enforcing 1080 × 1080.

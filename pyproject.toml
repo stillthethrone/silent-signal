@@ -35,6 +35,7 @@ ss-extract-pose = "silent_signal.cli.extract_pose:entrypoint"
 ss-prepare-pose-graph = "silent_signal.cli.prepare_graph:entrypoint"
 ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
 ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
+ss-fetch-vsl400-kaggle = "silent_signal.cli.fetch_vsl400_kaggle:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]
