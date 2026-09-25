@@ -59,6 +59,26 @@ uv run ss-select-classes --manifest data/manifests/vsl400.parquet --output-root 
 
 See [the VSL400 pose contract](docs/vsl400_pose.md) for details.
 
+## VSL400 pose branch on MediaPipe keypoints
+
+[Notebook 12](notebooks/12_vsl400_mediapipe_pose_transformer.ipynb) trains the
+pose branch of the RGB–pose design (Graph Encoder with 2 graph blocks, Spatial
+Transformer 2 × 4 heads, joint pooling, Temporal Transformer 3 × 4 heads,
+256-d pose embedding) on 70 VSL400 glosses, front view. It reads the MediaPipe
+Holistic keypoints already extracted in the Kaggle redistribution (after you
+confirm permission), rebuilds the project's signer-disjoint split from the
+VSL400 metadata, and saves the manifest, packed keypoints, checkpoints,
+predictions, metrics and figures to Google Drive. The same steps are available
+locally:
+
+```powershell
+uv run ss-fetch-vsl400-kaggle keypoints --manifest data/subsets/vsl400_top70/manifest.csv --output data/subsets/vsl400_top70/mediapipe76_front.npz
+uv run ss-train-pose-transformer --manifest data/subsets/vsl400_top70/manifest.csv `
+  --keypoints data/subsets/vsl400_top70/mediapipe76_front.npz --output-root artifacts/runs/pose_top70
+```
+
+See [the MediaPipe pose-branch contract](docs/vsl400_mediapipe_pose.md).
+
 ## Implemented milestone: VSL400 preparation
 
 - Parse the three synchronized camera metadata files into one stable manifest.

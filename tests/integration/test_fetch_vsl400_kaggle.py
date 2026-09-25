@@ -4,15 +4,18 @@ import base64
 import io
 import json
 import threading
+import unicodedata
 import zipfile
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
 from silent_signal.cli import fetch_vsl400_kaggle, prepare, select_classes
+from silent_signal.data.keypoint_pack import read_packed_keypoints
 from silent_signal.data.manifest import read_manifest
 from silent_signal.data.remote_zip import RemoteArchive, RemoteZipError
 
@@ -62,7 +65,41 @@ def _archive_bytes() -> tuple[bytes, dict[str, bytes]]:
                         f"{root}/{view}/{row['video_id']}.mp4", payload, compress_type=method
                     )
                     videos[f"{view}/{row['video_id']}.mp4"] = payload
+        _write_keypoints(archive, rows)
     return buffer.getvalue(), videos
+
+
+_KEYPOINTS: dict[str, np.ndarray] = {}
+
+
+def _npy(array: np.ndarray) -> bytes:
+    buffer = io.BytesIO()
+    np.save(buffer, array, allow_pickle=False)
+    return buffer.getvalue()
+
+
+def _write_keypoints(archive: zipfile.ZipFile, rows: list[dict[str, object]]) -> None:
+    """Uploader-style front-view keypoints, with the edge cases seen in the real release."""
+
+    _KEYPOINTS.clear()
+    base = "processed/processed/keypoints_splited"
+    for row in rows:
+        video_id, gloss = str(row["video_id"]), str(row["gloss"])
+        if video_id == "000005":
+            continue  # MediaPipe or the crop step produced nothing for this clip
+        array = np.full((20 + int(video_id), 76, 3), int(video_id) / 100, dtype=np.float32)
+        folder = "Sai tên" if video_id == "000006" else gloss
+        if video_id == "000003":
+            folder = unicodedata.normalize("NFD", gloss)  # same gloss, other Unicode form
+        split = "test" if int(str(row["signer_id"])) > 6 else "train"
+        archive.writestr(f"{base}/{split}/{folder}/{video_id}.npy", _npy(array))
+        _KEYPOINTS[video_id] = array
+    decoy = np.full((5, 76, 3), -9.0, dtype=np.float32)
+    archive.writestr(f"{base}/train/Xin chào/000001.npy", _npy(decoy))  # online clip, same ID
+    archive.writestr(
+        "processed_augmented/processed_augmented/keypoints_splited/train/Anh/000000.npy",
+        _npy(decoy),
+    )
 
 
 class _KaggleStub(BaseHTTPRequestHandler):
@@ -213,3 +250,47 @@ def test_remote_archive_requires_range_support(tmp_path: Path) -> None:
 
     with pytest.raises((RemoteZipError, OSError)):
         RemoteArchive(resolve, retries=0)
+
+
+def test_keypoints_follow_manifest_split_and_skip_unmatched_clips(
+    kaggle_stub: tuple[str, dict[str, bytes]], config_file: Path, tmp_path: Path, capsys
+) -> None:
+    url, _videos = kaggle_stub
+    meta_root = tmp_path / "meta"
+    assert _run(url, "metadata", "--output-root", str(meta_root)) == 0
+    config = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+    config["dataset"]["root"] = str(meta_root)
+    full_config = tmp_path / "full.yaml"
+    full_config.write_text(yaml.safe_dump(config, allow_unicode=True), encoding="utf-8")
+    assert prepare.main(["build-manifest", "--config", str(full_config)]) == 0
+    assert prepare.main(["create-splits", "--config", str(full_config)]) == 0
+    prepared = tmp_path / "prepared"
+    manifest = Path(config["outputs"]["manifest_parquet"])
+    args = ["--manifest", str(manifest), "--output-root", str(prepared), "--classes", "2"]
+    assert select_classes.main(args) == 0
+
+    packed_path = tmp_path / "keypoints.npz"
+    fetch = [
+        "keypoints",
+        "--manifest",
+        str(prepared / "manifest.csv"),
+        "--output",
+        str(packed_path),
+    ]
+    assert _run(url, *fetch, "--min-coverage", "1.0") == 1
+    assert "only 93.8% of the clips were packed" in capsys.readouterr().err
+    assert _run(url, *fetch, "--min-coverage", "0.9") == 0
+
+    packed = read_packed_keypoints(packed_path)
+    front = {r.sample_id: r for r in read_manifest(prepared / "manifest.csv") if r.view == "front"}
+    assert len(front) == 32 and len(packed.sample_ids) == 30
+    assert packed.metadata["counts"] == {
+        "requested": 32,
+        "packed": 30,
+        "gloss_mismatch": 1,
+        "missing": 1,
+    }
+    assert "processed_augmented" not in json.dumps(packed.metadata["members"])
+    for position, sample_id in enumerate(packed.sample_ids):
+        video_id = front[sample_id].video_id
+        np.testing.assert_array_equal(packed.sequence(position), _KEYPOINTS[video_id])

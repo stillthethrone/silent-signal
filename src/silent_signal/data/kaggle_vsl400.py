@@ -1,10 +1,12 @@
-"""Read VSL400 raw videos from the Kaggle ``vsl-vietnamese-sign-language-v2`` archive.
+"""Read VSL400 from the Kaggle ``vsl-vietnamese-sign-language-v2`` archive.
 
 The Kaggle dataset re-distributes the seven VSL400 release parts under
-``raw/raw/VSL400/Part_{1..7}`` inside one ~75 GB download. Nothing here downloads the
-whole archive: metadata JSONs are merged from their byte ranges, and only the videos a
-subset needs are extracted. The Kaggle copy is a third-party redistribution of a
-controlled-access dataset; confirm your right to use it with the VSL400 maintainers.
+``raw/raw/VSL400/Part_{1..7}`` inside one ~75 GB download, next to the uploader's
+front-view MediaPipe keypoints (``processed/processed/keypoints_splited``). Nothing here
+downloads the whole archive: metadata JSONs are merged from their byte ranges, and only
+the videos or keypoint arrays a subset needs are extracted. The Kaggle copy is a
+third-party redistribution of a controlled-access dataset; confirm your right to use it
+with the VSL400 maintainers.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ import base64
 import json
 import re
 import tempfile
+import unicodedata
 import urllib.error
 import urllib.request
 import zipfile
@@ -22,6 +25,11 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
+from silent_signal.contracts import ManifestRecord
+from silent_signal.data.keypoint_pack import write_packed_keypoints
 from silent_signal.data.remote_zip import (
     RemoteArchive,
     RemoteZipError,
@@ -37,6 +45,7 @@ STATE_FILE = ".kaggle_vsl400_source.json"
 
 _JSON = re.compile(r"(?:^|/)VSL400/Part_(\d+)/(?:.*/)?(front_view|left_view|right_view)\.json$")
 _VIDEO = re.compile(r"(?:^|/)VSL400/Part_(\d+)/(?:.*/)?(front_view|left_view|right_view)/([^/]+)$")
+_KEYPOINTS = re.compile(r"(?:^|/)keypoints_splited/(train|test)/([^/]+)/([^/]+)\.npy$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -214,3 +223,101 @@ def _pin_source(output_root: Path, archive: RemoteArchive, source: dict[str, Any
             )
         return
     state.write_text(json.dumps(identity, indent=2) + "\n", encoding="utf-8")
+
+
+def locate_mediapipe_keypoints(
+    members: Sequence[zipfile.ZipInfo],
+) -> dict[str, list[tuple[str, str, str]]]:
+    """Map video IDs to canonical keypoint members as ``(gloss folder, member, split)``.
+
+    The uploader's augmented copies (``processed_augmented``) are ignored: they are
+    imputed and perturbed, so their missing-joint masks cannot be recovered.
+    """
+
+    index: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
+    for item in members:
+        if item.is_dir() or "processed_augmented" in PurePosixPath(item.filename).parts:
+            continue
+        if match := _KEYPOINTS.search(item.filename):
+            index[match[3]].append((match[2], item.filename, match[1]))
+    if not index:
+        raise RemoteZipError("No keypoints_splited/<split>/<gloss>/<id>.npy files in the archive.")
+    return dict(index)
+
+
+def fetch_keypoints(
+    archive: RemoteArchive,
+    members: Sequence[zipfile.ZipInfo],
+    records: Sequence[ManifestRecord],
+    output_path: Path,
+    *,
+    source: dict[str, Any],
+    workers: int = 8,
+    report: Callable[[str], None] = print,
+) -> dict[str, Any]:
+    """Pack the MediaPipe keypoints of ``records`` (one view) into ``output_path``.
+
+    A record matches a keypoint file with the same video ID whose gloss folder equals the
+    record's gloss after Unicode/case normalization. Records without a usable match are
+    reported, not guessed.
+    """
+
+    index = locate_mediapipe_keypoints(members)
+    matched: dict[str, str] = {}
+    status: dict[str, list[str]] = defaultdict(list)
+    for record in records:
+        candidates = [
+            member
+            for gloss, member, _split in index.get(record.video_id, [])
+            if _gloss_key(gloss) == _gloss_key(record.gloss_name)
+        ]
+        if len(candidates) == 1:
+            matched[record.sample_id] = candidates[0]
+        elif candidates:
+            status["ambiguous"].append(record.sample_id)
+        elif record.video_id in index:
+            status["gloss_mismatch"].append(record.sample_id)
+        else:
+            status["missing"].append(record.sample_id)
+
+    sequences: dict[str, NDArray[np.float32]] = {}
+    output_path = output_path.resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output_path.parent) as scratch:
+        targets = {
+            member: Path(scratch) / f"{number}.npy"
+            for number, member in enumerate(matched.values())
+        }
+        extract_members(archive, targets, members, workers=workers, reserve_bytes=0, report=report)
+        for sample_id, member in matched.items():
+            array = np.load(targets[member], allow_pickle=False)
+            if (
+                array.ndim != 3
+                or array.shape[1:] != (76, 3)
+                or len(array) == 0
+                or not np.isfinite(array).all()
+            ):
+                status["invalid"].append(sample_id)
+                continue
+            sequences[sample_id] = array.astype(np.float32)
+    counts = {"requested": len(records), "packed": len(sequences)} | {
+        key: len(value) for key, value in sorted(status.items())
+    }
+    write_packed_keypoints(
+        output_path,
+        sequences,
+        {
+            "schema_version": 1,
+            "format": "vsl_mediapipe_holistic_76",
+            "source": {**source, "size": archive.identity.size, "etag": archive.identity.etag},
+            "members": {sample_id: matched[sample_id] for sample_id in sorted(sequences)},
+            "counts": counts,
+            "unpacked": {key: sorted(value) for key, value in sorted(status.items())},
+        },
+    )
+    report(f"[keypoints] {counts}")
+    return counts
+
+
+def _gloss_key(value: str) -> str:
+    return " ".join(unicodedata.normalize("NFC", value).casefold().split())

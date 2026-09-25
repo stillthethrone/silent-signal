@@ -15,15 +15,18 @@ def interpolate_short_gaps(
     *,
     max_gap: int,
 ) -> tuple[NDArray[np.float32], NDArray[np.float32], NDArray[np.bool_]]:
-    """Linearly fill only gaps bracketed by observations from the same joint."""
+    """Linearly fill only gaps bracketed by observations from the same joint.
+
+    ``coordinates`` has shape ``[T, V, D]`` (2D or 3D points); scores and masks ``[T, V]``.
+    """
 
     if max_gap < 0:
         raise ValueError("max_gap must not be negative.")
     xy = np.asarray(coordinates, dtype=np.float32).copy()
     confidence = np.asarray(scores, dtype=np.float32).copy()
     observed = np.asarray(observed_mask, dtype=np.bool_)
-    if xy.ndim != 3 or xy.shape[-1] != 2:
-        raise ValueError("coordinates must have shape [T, V, 2].")
+    if xy.ndim != 3 or xy.shape[-1] < 1:
+        raise ValueError("coordinates must have shape [T, V, D].")
     if confidence.shape != xy.shape[:2] or observed.shape != xy.shape[:2]:
         raise ValueError("scores and observed_mask must have shape [T, V].")
 
