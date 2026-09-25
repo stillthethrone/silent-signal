@@ -57,7 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--classes", type=int, default=50)
+    parser.add_argument(
+        "--classes",
+        type=int,
+        default=70,
+        help="Number of top classes, or zero to extract every canonical keypoint class.",
+    )
     parser.add_argument("--min-official-train-samples", type=int, default=40)
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
@@ -70,8 +75,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        if args.classes < 1:
-            raise ValueError("--classes must be positive.")
+        if args.classes < 0:
+            raise ValueError("--classes must be zero (all) or positive.")
         if args.min_official_train_samples < 1:
             raise ValueError("--min-official-train-samples must be positive.")
         if args.workers < 1:
@@ -126,7 +131,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "archive_size": archive.identity.size,
             "archive_etag": archive.identity.etag,
             "auth_mode": auth_mode,
-            "selection_strategy": "descending_official_train_count_then_gloss",
+            "selection_strategy": (
+                "all_canonical_glosses"
+                if args.classes == 0
+                else "descending_official_train_count_then_gloss"
+            ),
             "classes": len(selected),
             "min_official_train_samples": args.min_official_train_samples,
             "selected_glosses": list(selected),
@@ -245,6 +254,8 @@ def select_glosses(
         key = _gloss_key(item.gloss)
         display_by_key.setdefault(key, item.gloss)
         counts[key][item.split] += 1
+    if classes == 0:
+        return tuple(display_by_key[key] for key in sorted(counts))
     eligible = [
         key
         for key, split_counts in counts.items()

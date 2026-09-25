@@ -119,3 +119,29 @@ def test_fetches_selected_keypoints_from_one_remote_archive(
     assert _ArchiveStub.download_requests == 2
     resumed = json.loads((output / "_fetch_report.json").read_text(encoding="utf-8"))
     assert resumed["extraction"] == {"kept": 7, "extracted": 0}
+
+
+def test_fetches_all_canonical_keypoints_when_classes_is_zero(
+    archive_server: str, tmp_path: Path
+) -> None:
+    output = tmp_path / "all-keypoints"
+    arguments = [
+        "--output-root",
+        str(output),
+        "--classes",
+        "0",
+        "--workers",
+        "2",
+        "--download-url",
+        archive_server,
+    ]
+    assert main(arguments) == 0
+    assert _ArchiveStub.download_requests == 1
+    assert len(list(output.rglob("*.npy"))) == 9
+    assert (output / "train" / "C" / "0.npy").is_file()
+    assert not (output / "processed_augmented").exists()
+    report = json.loads((output / "_fetch_report.json").read_text(encoding="utf-8"))
+    assert report["selection_strategy"] == "all_canonical_glosses"
+    assert report["selected_glosses"] == ["A", "B", "C"]
+    assert report["classes"] == 3
+    assert report["files"] == 9
