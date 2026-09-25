@@ -279,3 +279,7 @@ def _progress(
 
 def _mean(values: Sequence[float]) -> float | None:
     return sum(values) / len(values) if values else None
+
+
+if __name__ == "__main__":
+    entrypoint()
