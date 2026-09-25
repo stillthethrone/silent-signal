@@ -163,14 +163,23 @@ def train_pose_transformer(
     resume: bool = True,
     run_test: bool = False,
     project_commit: str | None = None,
+    progress_every_batches: int = 25,
     log: Callable[[str], None] = print,
 ) -> dict[str, Any]:
     """Train with validation early stopping, then evaluate the best checkpoint."""
 
+    if progress_every_batches < 0:
+        raise ValueError("progress_every_batches must not be negative.")
     output_root.mkdir(parents=True, exist_ok=True)
     started = time.perf_counter()
+    load_started = time.perf_counter()
+    log(f"[setup] loading packed keypoints: {keypoints_path}")
     records, sequences, data_summary = load_split_data(
         manifest_path, keypoints_path, view=training.view
+    )
+    log(
+        f"[setup] packed keypoints loaded in {time.perf_counter() - load_started:.1f}s | "
+        f"{data_summary['packed_records']:,} selected clips"
     )
     layout = get_pose_layout(training.features.layout_name)
     model_config = PoseTransformerConfig(
@@ -184,6 +193,8 @@ def train_pose_transformer(
     )
     device = _device(device_name)
     _seed_everything(training.seed)
+    fingerprint_started = time.perf_counter()
+    log("[setup] verifying manifest and packed-keypoint SHA-256...")
     fingerprint = {
         "manifest_sha256": _sha256(manifest_path),
         "keypoints_sha256": _sha256(keypoints_path),
@@ -191,6 +202,7 @@ def train_pose_transformer(
         "training": asdict(training),
         "project_commit": project_commit,
     }
+    log(f"[setup] fingerprints ready in {time.perf_counter() - fingerprint_started:.1f}s")
     config_payload = {
         "model": asdict(model_config),
         **fingerprint,
@@ -210,13 +222,19 @@ def train_pose_transformer(
         augmentation=training.augmentation,
         seed=training.seed,
     )
-    eval_sets = {
-        split: PoseSequenceDataset(sequences[split], labels[split], training.features)
-        for split in ("validation", "test")
-        if records[split]
-    }
-    if "validation" not in eval_sets:
+    if not records["validation"]:
         raise ValueError("A validation split is required for early stopping.")
+    validation_started = time.perf_counter()
+    log(f"[setup] preparing {len(records['validation']):,} deterministic validation clips...")
+    eval_sets = {
+        "validation": PoseSequenceDataset(
+            sequences["validation"], labels["validation"], training.features
+        )
+    }
+    log(
+        f"[setup] validation clips ready in {time.perf_counter() - validation_started:.1f}s; "
+        "test features are not prepared or evaluated until the best checkpoint is selected"
+    )
     adjacency = torch.from_numpy(normalized_adjacency(layout)).to(device)
 
     model = PoseGraphTransformer(model_config).to(device)
@@ -267,7 +285,11 @@ def train_pose_transformer(
         loader = _loader(train_set, training, shuffle=True, seed=training.seed + epoch)
         model.train()
         total_loss, correct, seen = 0.0, 0, 0
-        for features, joint_mask, frame_mask, target in loader:
+        total_batches = len(loader)
+        log(
+            f"[train {epoch + 1:>3}/{training.epochs}] starting {total_batches} batches..."
+        )
+        for batch_index, (features, joint_mask, frame_mask, target) in enumerate(loader, start=1):
             features, joint_mask = features.to(device), joint_mask.to(device)
             frame_mask, target = frame_mask.to(device), target.to(device)
             optimizer.zero_grad(set_to_none=True)
@@ -284,7 +306,21 @@ def train_pose_transformer(
             total_loss += float(loss.detach()) * len(target)
             correct += int((logits.argmax(dim=1) == target).sum())
             seen += len(target)
+            if progress_every_batches and (
+                batch_index == 1
+                or batch_index == total_batches
+                or batch_index % progress_every_batches == 0
+            ):
+                elapsed = time.perf_counter() - epoch_started
+                rate = batch_index / elapsed if elapsed else 0.0
+                eta = (total_batches - batch_index) / rate / 60 if rate else 0.0
+                log(
+                    f"[train {epoch + 1:>3}/{training.epochs}] "
+                    f"batch {batch_index:>3}/{total_batches} | loss {total_loss / seen:.3f} | "
+                    f"top1 {correct / seen:.3f} | ETA {eta:.1f} min"
+                )
 
+        log(f"[validation] epoch {epoch + 1}/{training.epochs} | evaluating...")
         validation = _evaluate(
             model, eval_sets["validation"], training, adjacency, device, criterion
         )
@@ -339,8 +375,16 @@ def train_pose_transformer(
         raise RuntimeError("No best checkpoint was written.")
     best = torch.load(best_path, map_location="cpu", weights_only=False)
     model.load_state_dict(best["model"])
+    if run_test and records["test"]:
+        test_started = time.perf_counter()
+        log(f"[test] preparing {len(records['test']):,} clips after checkpoint selection...")
+        eval_sets["test"] = PoseSequenceDataset(
+            sequences["test"], labels["test"], training.features
+        )
+        log(f"[test] clips ready in {time.perf_counter() - test_started:.1f}s")
     evaluation: dict[str, Any] = {}
     for split in ["validation"] + (["test"] if run_test and "test" in eval_sets else []):
+        log(f"[{split}] evaluating best checkpoint...")
         result = _evaluate(model, eval_sets[split], training, adjacency, device, criterion)
         _write_predictions(
             output_root / f"predictions_{split}.csv", records[split], result, data_summary

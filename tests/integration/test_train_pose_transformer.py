@@ -95,7 +95,7 @@ def _args(manifest: Path, keypoints: Path, output: Path, *extra: str) -> list[st
     ]
 
 
-def test_training_writes_reports_and_resumes(tmp_path: Path) -> None:
+def test_training_writes_reports_and_resumes(tmp_path: Path, capsys) -> None:
     manifest, keypoints = _dataset(tmp_path)
     output = tmp_path / "run"
     assert (
@@ -111,6 +111,15 @@ def test_training_writes_reports_and_resumes(tmp_path: Path) -> None:
     assert report["data"]["class_names"] == ["từ 0", "từ 1", "từ 2"]
     assert report["epochs_completed"] == 6 and report["test_evaluated"]
     assert report["evaluation"]["validation"]["top1_accuracy"] >= 0.5
+    first_output = capsys.readouterr().out
+    assert "[setup] loading packed keypoints" in first_output
+    assert "[setup] packed keypoints loaded" in first_output
+    assert "[setup] fingerprints ready" in first_output
+    assert "[train   1/6] batch" in first_output
+    assert "[validation] epoch 1/6" in first_output
+    assert "test features are not prepared or evaluated" in first_output
+    assert "[validation] evaluating best checkpoint" in first_output
+    assert "[test] evaluating best checkpoint" in first_output
     for name in (
         "config.json",
         "history.json",
@@ -170,3 +179,14 @@ def test_training_refuses_incomplete_keypoint_pack(tmp_path: Path, capsys) -> No
 
     assert train_pose_transformer.main(_args(manifest, keypoints, tmp_path / "run")) == 2
     assert "missing 1 manifest samples" in capsys.readouterr().err
+
+
+def test_training_rejects_negative_progress_interval(tmp_path: Path, capsys) -> None:
+    manifest, keypoints = _dataset(tmp_path)
+    assert (
+        train_pose_transformer.main(
+            _args(manifest, keypoints, tmp_path / "run", "--progress-every-batches", "-1")
+        )
+        == 2
+    )
+    assert "progress_every_batches must not be negative" in capsys.readouterr().err

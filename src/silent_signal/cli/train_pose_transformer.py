@@ -45,6 +45,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-delta", type=float, default=0.0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument(
+        "--progress-every-batches",
+        type=int,
+        default=25,
+        help="Print an in-epoch progress line every N train batches; 0 disables it.",
+    )
     parser.add_argument("--device", default="auto")
     parser.add_argument(
         "--project-commit",
@@ -87,6 +93,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             resume=not args.no_resume,
             run_test=args.run_test,
             project_commit=args.project_commit,
+            progress_every_batches=args.progress_every_batches,
             log=lambda message: print(message, flush=True),
         )
         summary = {key: report[key] for key in ("best_epoch", "stopped_early", "evaluation")}
