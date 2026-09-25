@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 
 from silent_signal.cli.prepare_kaggle_vsl_mediapipe import main
+from silent_signal.data.keypoint_pack import read_packed_keypoints
 from silent_signal.data.manifest import read_manifest
 from silent_signal.pose.cache import pose_cache_path
 from silent_signal.preprocessing.cache import read_graph_pose_cache
@@ -89,3 +90,33 @@ expected: {}
     records = read_manifest(manifest)
     sample = read_graph_pose_cache(pose_cache_path(graph_root, records[0].sample_id))
     assert sample.features.shape == (8, 75, 7)
+
+    packed_path = tmp_path / "keypoints.npz"
+    pack_report = tmp_path / "pack-report.json"
+    pack_arguments = [
+        "pack",
+        "--keypoint-root",
+        str(keypoints),
+        "--manifest",
+        str(manifest),
+        "--output",
+        str(packed_path),
+        "--report",
+        str(pack_report),
+        "--progress-every",
+        "0",
+    ]
+    assert main(pack_arguments) == 0
+    assert main(pack_arguments) == 0
+    packed = read_packed_keypoints(packed_path)
+    assert len(packed.sample_ids) == len(records)
+    assert packed.sequence(0).shape == (5, 76, 3)
+    assert packed.metadata["model_layout"] == "mediapipe_upper68_v1"
+
+    assert main([*pack_arguments, "--dataset-handle", "different/dataset"]) == 2
+
+    changed = keypoints / records[0].video_path
+    values = np.load(changed, allow_pickle=False)
+    values[0, 0, 0] += 1.0
+    np.save(changed, values)
+    assert main(pack_arguments) == 2  # stale packed data must never be reused silently

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import time
@@ -14,11 +15,13 @@ from typing import Any
 
 import yaml
 
+from silent_signal.contracts import ManifestRecord
 from silent_signal.data.kaggle_vsl import (
     build_kaggle_vsl_manifest,
     class_count_summary,
     selection_payload,
 )
+from silent_signal.data.keypoint_pack import write_packed_keypoints
 from silent_signal.data.manifest import (
     ManifestError,
     read_manifest,
@@ -35,6 +38,7 @@ from silent_signal.preprocessing.mediapipe_features import (
     load_mediapipe_array,
     mediapipe_preprocessing_fingerprint,
     prepare_mediapipe_graph_pose,
+    validate_raw_keypoints,
 )
 
 DEFAULT_DATASET_HANDLE = "nguyenanfms/vsl-vietnamese-sign-language-v2/versions/8"
@@ -70,6 +74,17 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("--overwrite", action="store_true")
     convert.add_argument("--continue-on-error", action="store_true")
 
+    pack = subparsers.add_parser(
+        "pack", help="Pack manifest-selected raw [T,76,3] arrays into one resumable NPZ."
+    )
+    pack.add_argument("--keypoint-root", type=Path, required=True)
+    pack.add_argument("--manifest", type=Path, required=True)
+    pack.add_argument("--output", type=Path, required=True)
+    pack.add_argument("--report", type=Path, required=True)
+    pack.add_argument("--dataset-handle", default=DEFAULT_DATASET_HANDLE)
+    pack.add_argument("--progress-every", type=int, default=100)
+    pack.add_argument("--overwrite", action="store_true")
+
     fingerprint = subparsers.add_parser("fingerprint", help="Print preprocessing identity.")
     fingerprint.add_argument("--config", type=Path, required=True)
     return parser
@@ -82,6 +97,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _build(args)
         if args.command == "convert":
             return _convert(args)
+        if args.command == "pack":
+            return _pack(args)
         config, _ = _load_config(args.config)
         print(mediapipe_preprocessing_fingerprint(config))
         return 0
@@ -237,6 +254,110 @@ def _convert(args: argparse.Namespace) -> int:
         flush=True,
     )
     return 1 if summary["failed"] else 0
+
+
+def _pack(args: argparse.Namespace) -> int:
+    """Write exactly the manifest-selected canonical arrays into one portable archive."""
+
+    manifest_path = args.manifest.resolve()
+    root = args.keypoint_root.resolve()
+    output_path = args.output.resolve()
+    report_path = args.report.resolve()
+    records = tuple(sorted(read_manifest(manifest_path), key=lambda item: item.sample_id))
+    if not records:
+        raise ValueError("Manifest contains no records.")
+    if args.progress_every < 0:
+        raise ValueError("--progress-every must not be negative.")
+    manifest_sha256 = sha256_file(manifest_path)
+    source_sha256 = _selected_source_sha256(records, root)
+    if output_path.is_file() and report_path.is_file() and not args.overwrite:
+        previous = json.loads(report_path.read_text(encoding="utf-8"))
+        reusable = (
+            previous.get("status") == "complete"
+            and previous.get("manifest_sha256") == manifest_sha256
+            and previous.get("dataset_handle") == args.dataset_handle
+            and int(previous.get("samples", -1)) == len(records)
+            and previous.get("source_sha256") == source_sha256
+            and previous.get("output_sha256") == sha256_file(output_path)
+        )
+        if reusable:
+            print(json.dumps(previous, ensure_ascii=False, indent=2), flush=True)
+            print("Packed keypoints are current; reusing the Drive artifact.", flush=True)
+            return 0
+        raise ValueError(
+            f"Packed output already exists but does not match this manifest: {output_path}. "
+            "Use --overwrite or choose another output path."
+        )
+
+    sequences: dict[str, Any] = {}
+    total_frames = 0
+    started_at = time.perf_counter()
+    for position, record in enumerate(records, start=1):
+        source = root / record.video_path
+        if not source.is_file():
+            raise ValueError(f"MediaPipe keypoint file not found: {source}")
+        array = validate_raw_keypoints(load_mediapipe_array(source))
+        sequences[record.sample_id] = array
+        total_frames += int(array.shape[0])
+        if args.progress_every and (
+            position == 1 or position == len(records) or position % args.progress_every == 0
+        ):
+            elapsed = time.perf_counter() - started_at
+            rate = position / elapsed if elapsed else 0.0
+            eta = (len(records) - position) / rate / 60 if rate else 0.0
+            print(
+                f"[pack] {position}/{len(records)} | frames={total_frames:,} | "
+                f"ETA={eta:.1f} min",
+                flush=True,
+            )
+
+    metadata = {
+        "schema_version": 1,
+        "format": "vsl_mediapipe_holistic_76",
+        "dataset_handle": args.dataset_handle,
+        "manifest_sha256": manifest_sha256,
+        "source_sha256": source_sha256,
+        "source_root": str(root),
+        "samples": len(records),
+        "frames": total_frames,
+        "joint_shape": ["T", 76, 3],
+        "model_layout": "mediapipe_upper68_v1",
+    }
+    write_packed_keypoints(output_path, sequences, metadata)
+    report = {
+        "schema_version": 1,
+        "status": "complete",
+        "manifest": str(manifest_path),
+        "manifest_sha256": manifest_sha256,
+        "dataset_handle": args.dataset_handle,
+        "source_sha256": source_sha256,
+        "output": str(output_path),
+        "output_sha256": sha256_file(output_path),
+        "output_bytes": output_path.stat().st_size,
+        "samples": len(records),
+        "frames": total_frames,
+        "duration_seconds": round(time.perf_counter() - started_at, 3),
+    }
+    write_json_atomic(report_path, report)
+    print(json.dumps(report, ensure_ascii=False, indent=2), flush=True)
+    return 0
+
+
+def _selected_source_sha256(records: Sequence[ManifestRecord], root: Path) -> str:
+    """Fingerprint every selected source file in manifest order before pack reuse."""
+
+    digest = hashlib.sha256()
+    for record in records:
+        source = root / record.video_path
+        if not source.is_file():
+            raise ValueError(f"MediaPipe keypoint file not found: {source}")
+        digest.update(record.sample_id.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(record.video_path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(sha256_file(source).encode("ascii"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 def _load_config(path: Path) -> tuple[MediaPipeGraphPreprocessConfig, dict[str, Any]]:
