@@ -39,6 +39,7 @@ ss-train-pose-graph = "silent_signal.cli.train_pose_graph:entrypoint"
 ss-prepare-multi-vsl = "silent_signal.cli.prepare_multi_vsl_demo:entrypoint"
 ss-prepare-multi-vsl-pose = "silent_signal.cli.prepare_multi_vsl_pose:entrypoint"
 ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
+ss-fetch-kaggle-vsl-mediapipe = "silent_signal.cli.fetch_kaggle_vsl_mediapipe:entrypoint"
 ss-prepare-kaggle-vsl-mediapipe = "silent_signal.cli.prepare_kaggle_vsl_mediapipe:entrypoint"
 
 [tool.hatch.build.targets.wheel]
