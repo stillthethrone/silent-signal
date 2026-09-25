@@ -37,6 +37,7 @@ ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
 ss-prepare-multi-vsl = "silent_signal.cli.prepare_multi_vsl_demo:entrypoint"
 ss-prepare-multi-vsl-pose = "silent_signal.cli.prepare_multi_vsl_pose:entrypoint"
 ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
+ss-prepare-kaggle-vsl-mediapipe = "silent_signal.cli.prepare_kaggle_vsl_mediapipe:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]

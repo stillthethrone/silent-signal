@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from torch import Tensor, nn
 
-from silent_signal.models.encoders.pose_encoder import PoseGraphEncoder
 from silent_signal.models.heads.classification import ClassificationHead
 
 
@@ -13,7 +12,7 @@ class PoseGraphRecognizer(nn.Module):
 
     def __init__(
         self,
-        encoder: PoseGraphEncoder,
+        encoder: nn.Module,
         *,
         embedding_dim: int,
         num_classes: int,

@@ -1,0 +1,13 @@
+schema_version: 1
+
+# The Kaggle arrays contain 76 xyz rows. Dataset documentation does not define
+# the extra row, so v1 deliberately consumes only the standard MediaPipe
+# 33-pose + 21-left-hand + 21-right-hand ordering (75 graph nodes).
+preprocessing:
+  layout_name: mediapipe_holistic_75_v1
+  target_frames: 64
+  interpolation_max_gap: 3
+  zero_epsilon: 1.0e-8
+
+# The notebook pins these values after building the selected manifest.
+expected: {}

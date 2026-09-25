@@ -1,0 +1,20 @@
+schema_version: 1
+dataset:
+  name: kaggle_vsl_vietnamese_sign_language_v2
+  handle: nguyenanfms/vsl-vietnamese-sign-language-v2/versions/8
+  keypoint_directory: processed/processed/keypoints_splited
+  source_extractor: mediapipe_holistic
+  source_shape: [T, 76, 3]
+  license: CC-BY-4.0
+
+selection:
+  classes: 50
+  min_official_train_samples: 40
+  require_official_test_sample: true
+
+splitting:
+  official_test_is_held_out: true
+  validation_fraction_of_official_train: 0.20
+  seed: 42
+  protocol: provided_test_plus_stratified_sample_validation
+  signer_disjoint_validation: false
