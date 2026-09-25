@@ -7,6 +7,7 @@ import zipfile
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import ClassVar
 
 import numpy as np
 import pytest
@@ -41,6 +42,7 @@ class _ArchiveStub(BaseHTTPRequestHandler):
     download_requests = 0
     blob_requests = 0
     leaked_auth = False
+    download_paths: ClassVar[list[str]] = []
 
     def log_message(self, *args: object) -> None:
         return
@@ -49,6 +51,7 @@ class _ArchiveStub(BaseHTTPRequestHandler):
         cls = type(self)
         if self.path.startswith("/download"):
             cls.download_requests += 1
+            cls.download_paths.append(self.path)
             if self.headers.get("Authorization") != f"Bearer {_TOKEN}":
                 self.send_error(401)
                 return
@@ -77,6 +80,7 @@ def archive_server(monkeypatch: pytest.MonkeyPatch) -> Iterator[str]:
     _ArchiveStub.download_requests = 0
     _ArchiveStub.blob_requests = 0
     _ArchiveStub.leaked_auth = False
+    _ArchiveStub.download_paths = []
     server = ThreadingHTTPServer(("127.0.0.1", 0), _ArchiveStub)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -114,6 +118,7 @@ def test_fetches_selected_keypoints_from_one_remote_archive(
     report = json.loads((output / "_fetch_report.json").read_text(encoding="utf-8"))
     assert report["selected_glosses"] == ["A", "B"]
     assert report["auth_mode"] == "api_token"
+    assert _ArchiveStub.download_paths == ["/download"]
 
     assert main(arguments) == 0
     assert _ArchiveStub.download_requests == 2
@@ -145,3 +150,4 @@ def test_fetches_all_canonical_keypoints_when_classes_is_zero(
     assert report["selected_glosses"] == ["A", "B", "C"]
     assert report["classes"] == 3
     assert report["files"] == 9
+    assert _ArchiveStub.download_paths == ["/download"]

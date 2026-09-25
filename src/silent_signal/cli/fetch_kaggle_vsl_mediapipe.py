@@ -27,7 +27,7 @@ from silent_signal.data.remote_zip import (
 )
 
 DEFAULT_DATASET = "nguyenanfms/vsl-vietnamese-sign-language-v2"
-DEFAULT_VERSION = 8
+DEFAULT_VERSION = 0
 DEFAULT_DOWNLOAD_URL = "https://www.kaggle.com/api/v1/datasets/download/{dataset}"
 _KEYPOINT = re.compile(
     r"(?:^|/)processed/processed/keypoints_splited/"
@@ -66,7 +66,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--min-official-train-samples", type=int, default=40)
     parser.add_argument("--workers", type=int, default=6)
     parser.add_argument("--dataset", default=DEFAULT_DATASET)
-    parser.add_argument("--version", type=int, default=DEFAULT_VERSION)
+    parser.add_argument(
+        "--version",
+        type=int,
+        default=DEFAULT_VERSION,
+        help="Kaggle dataset version, or zero to use the latest public version.",
+    )
     parser.add_argument("--report", type=Path)
     parser.add_argument("--download-url", help=argparse.SUPPRESS)
     return parser
@@ -127,7 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             "schema_version": 1,
             "status": "complete",
             "dataset": args.dataset,
-            "version": args.version,
+            "requested_version": args.version or "latest",
             "archive_size": archive.identity.size,
             "archive_etag": archive.identity.etag,
             "auth_mode": auth_mode,
@@ -185,8 +190,13 @@ def kaggle_archive_resolver(
     """Resolve one authenticated Kaggle archive URL without leaking credentials."""
 
     base = download_url or DEFAULT_DOWNLOAD_URL.format(dataset=dataset)
-    separator = "&" if "?" in base else "?"
-    url = f"{base}{separator}datasetVersionNumber={version}"
+    if version < 0:
+        raise ValueError("version must be zero (latest) or positive")
+    if version:
+        separator = "&" if "?" in base else "?"
+        url = f"{base}{separator}datasetVersionNumber={version}"
+    else:
+        url = base
     opener = urllib.request.build_opener(_NoRedirect)
 
     def resolve() -> tuple[str, dict[str, str]]:
