@@ -27,6 +27,8 @@ def test_notebook_runs_the_full_pose_pipeline_in_order() -> None:
         "cli('select_classes', *command)",
         "cli('fetch_vsl400_kaggle', 'keypoints'",
         "cli('train_pose_transformer', *arguments)",
+        "history, report = load_run(RUN_ROOT)",
+        "plot_training_curves(history, FIGURES_ROOT / 'training_curves.png'",
         "(RUN_ROOT / 'report.json')",
     ]
     positions = [source.index(step) for step in steps]

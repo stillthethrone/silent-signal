@@ -78,6 +78,24 @@ The best checkpoint is evaluated on validation, and on test only with `--run-tes
 `predictions_<split>.csv` (with top-5), `per_class_<split>.csv`, `confusion_<split>.csv` and
 figures.
 
+## Training curves
+
+`history.json` records, per epoch, train and validation loss, top-1, top-5 and macro-F1,
+the learning rate and the epoch time. Train values are running metrics over augmented
+batches with dropout active, so they understate accuracy on clean training clips.
+`ss-plot-training --run-root <run>` (or notebook step 6a, which also works mid-training)
+draws a 2 × 3 figure — loss, top-1 with chance level, top-5, macro-F1, generalization gap
+and learning rate, with the best epoch marked — and writes `training_summary.json` with
+heuristic findings:
+
+| Finding | Rule |
+| --- | --- |
+| `overfitting` | ≥ 3 epochs after the best, validation loss up > 5 % while train loss down > 5 % |
+| `large_generalization_gap` | train − validation top-1 > 0.25 at the best epoch |
+| `underfitting` | train top-1 < 0.5 at the best epoch with a gap < 0.1 |
+| `still_improving` | all requested epochs used and the best epoch is one of the last two |
+| `noisy_validation` | validation top-1 moves > 5 points per epoch beyond its trend (last 10 epochs) |
+
 ## Verification status
 
 Unit and integration tests cover the layout against the uploader's joint order, the features,
