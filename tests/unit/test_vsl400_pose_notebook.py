@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 _ROOT = Path(__file__).parents[2]
@@ -41,3 +42,18 @@ def test_vsl400_notebook_pins_rtmpose_environment_and_provenance() -> None:
     assert "checkpoint_sha256" in source
     assert "'extractor_fingerprint'" in source
     assert "coco_wholebody_75_t64.yaml" in source
+
+
+def test_vsl400_notebook_fetches_kaggle_videos_only_after_confirmation() -> None:
+    source = "\n".join(_code_cells())
+
+    assert "DATA_SOURCE = 'kaggle'" in source
+    assert "KAGGLE_VERSION = 8" in source
+    assert "CONFIRM_KAGGLE_VSL400_PERMISSION = False" in source
+    assert "userdata.get('KAGGLE_KEY')" in source
+    assert not re.search(r"print\([^\n]*KAGGLE_KEY", source)
+    metadata = source.index("[FETCH_CLI, 'metadata'")
+    split = source.index("[PREPARE_CLI, 'create-splits'")
+    select = source.index("[SELECT_CLI, '--manifest', FULL_MANIFEST")
+    videos = source.index("[FETCH_CLI, 'videos'")
+    assert metadata < split < select < videos

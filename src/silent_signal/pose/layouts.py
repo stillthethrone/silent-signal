@@ -280,7 +280,165 @@ def _build_wholebody_75_layout() -> PoseLayout:
 
 
 COCO_WHOLEBODY_75_V1: Final = _build_wholebody_75_layout()
-POSE_LAYOUTS: Final = MappingProxyType({COCO_WHOLEBODY_75_V1.name: COCO_WHOLEBODY_75_V1})
+
+# Joint order of the Kaggle ``keypoints_splited`` arrays ([T, 76, 3], MediaPipe Holistic),
+# as written by nguyenanfms/VSL-VietnameseSignLanguage ``src/features/keypoints.py``:
+# the 33 MediaPipe Pose landmarks, a synthesized neck (mean of the shoulders), then the
+# 21 hand landmarks in the order below with the left (``_0``) and right (``_1``) hands
+# interleaved. Missing detections are stored as (0, 0, 0).
+MEDIAPIPE_POSE_NAMES: Final = (
+    "nose",
+    "left_eye_inner",
+    "left_eye",
+    "left_eye_outer",
+    "right_eye_inner",
+    "right_eye",
+    "right_eye_outer",
+    "left_ear",
+    "right_ear",
+    "mouth_left",
+    "mouth_right",
+    "left_shoulder",
+    "right_shoulder",
+    "left_elbow",
+    "right_elbow",
+    "left_wrist",
+    "right_wrist",
+    "left_pinky",
+    "right_pinky",
+    "left_index",
+    "right_index",
+    "left_thumb",
+    "right_thumb",
+    "left_hip",
+    "right_hip",
+    "left_knee",
+    "right_knee",
+    "left_ankle",
+    "right_ankle",
+    "left_heel",
+    "right_heel",
+    "left_foot_index",
+    "right_foot_index",
+)
+_KAGGLE_HAND_ORDER: Final = (
+    "wrist",
+    "index_4",
+    "index_3",
+    "index_2",
+    "index_1",
+    "middle_4",
+    "middle_3",
+    "middle_2",
+    "middle_1",
+    "ring_4",
+    "ring_3",
+    "ring_2",
+    "ring_1",
+    "pinky_4",
+    "pinky_3",
+    "pinky_2",
+    "pinky_1",
+    "thumb_4",
+    "thumb_3",
+    "thumb_2",
+    "thumb_1",
+)
+MEDIAPIPE_76_JOINTS: Final = 76
+_MEDIAPIPE_NECK = len(MEDIAPIPE_POSE_NAMES)
+_MEDIAPIPE_UPPER_BODY = 25  # nose .. hips; knees and feet fall outside the 224x224 crop.
+
+
+def _mediapipe_hand_source(name: str, side: int) -> int:
+    return _MEDIAPIPE_NECK + 1 + 2 * _KAGGLE_HAND_ORDER.index(name) + side
+
+
+def _build_mediapipe_upper68_layout() -> PoseLayout:
+    body_parents: dict[str, str | None] = {
+        "nose": "neck",
+        "left_eye_inner": "nose",
+        "left_eye": "left_eye_inner",
+        "left_eye_outer": "left_eye",
+        "right_eye_inner": "nose",
+        "right_eye": "right_eye_inner",
+        "right_eye_outer": "right_eye",
+        "left_ear": "left_eye_outer",
+        "right_ear": "right_eye_outer",
+        "mouth_left": "nose",
+        "mouth_right": "nose",
+        "left_shoulder": "neck",
+        "right_shoulder": "neck",
+        "left_elbow": "left_shoulder",
+        "right_elbow": "right_shoulder",
+        "left_wrist": "left_elbow",
+        "right_wrist": "right_elbow",
+        "left_pinky": "left_wrist",
+        "right_pinky": "right_wrist",
+        "left_index": "left_wrist",
+        "right_index": "right_wrist",
+        "left_thumb": "left_wrist",
+        "right_thumb": "right_wrist",
+        "left_hip": "left_shoulder",
+        "right_hip": "right_shoulder",
+        "neck": None,
+    }
+    names = [*MEDIAPIPE_POSE_NAMES[:_MEDIAPIPE_UPPER_BODY], "neck"]
+    sources = [*range(_MEDIAPIPE_UPPER_BODY), _MEDIAPIPE_NECK]
+    index = {name: position for position, name in enumerate(names)}
+    joints = [
+        JointDefinition(
+            name,
+            source,
+            "face" if source <= 10 else "body",
+            None if body_parents[name] is None else index[str(body_parents[name])],
+        )
+        for name, source in zip(names, sources, strict=True)
+    ]
+    extra_edges = {
+        (index["mouth_left"], index["mouth_right"]),
+        (index["left_shoulder"], index["right_shoulder"]),
+        (index["left_hip"], index["right_hip"]),
+        (index["left_pinky"], index["left_index"]),
+        (index["right_pinky"], index["right_index"]),
+    }
+    for side, prefix, body_wrist in (
+        (0, "left_hand", "left_wrist"),
+        (1, "right_hand", "right_wrist"),
+    ):
+        offset = len(joints)
+        for local_index, local_name in enumerate(_HAND_LANDMARK_NAMES):
+            parent = None if local_index == 0 else _hand_parent(local_index, offset, 0)
+            joints.append(
+                JointDefinition(
+                    f"{prefix}_{local_name}",
+                    _mediapipe_hand_source(local_name, side),
+                    prefix,
+                    parent,
+                )
+            )
+        # Hands are normalized in their own boxes, so the wrist link carries no bone vector;
+        # it stays a graph edge for message passing. MCP joints are chained as in MediaPipe.
+        extra_edges.add((index[body_wrist], offset))
+        extra_edges.update(
+            {(offset + 5, offset + 9), (offset + 9, offset + 13), (offset + 13, offset + 17)}
+        )
+    parent_edges = {
+        (min(position, joint.parent), max(position, joint.parent))
+        for position, joint in enumerate(joints)
+        if joint.parent is not None
+    }
+    return PoseLayout(
+        name="mediapipe_upper68_v1",
+        source_layout="vsl_mediapipe_holistic_76",
+        joints=tuple(joints),
+        edges=tuple(sorted(parent_edges | {(min(a, b), max(a, b)) for a, b in extra_edges})),
+    )
+
+
+MEDIAPIPE_UPPER68_V1: Final = _build_mediapipe_upper68_layout()
+POSE_LAYOUTS: Final = MappingProxyType(
+    {layout.name: layout for layout in (COCO_WHOLEBODY_75_V1, MEDIAPIPE_UPPER68_V1)}
+)
 
 
 def get_pose_layout(name: str) -> PoseLayout:

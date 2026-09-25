@@ -44,7 +44,9 @@ and [graph encoder](docs/graph_encoder.md) contracts.
 
 [Notebook 11](notebooks/11_vsl400_rtmpose_pose_extraction.ipynb) extracts
 RTMPose-L WholeBody keypoints for 50 VSL400 glosses in all three views. It reads
-the extracted release from Google Drive, builds the full 400-gloss manifest and
+either the Kaggle redistribution (range-reading only the metadata and the
+selected videos out of its ~75 GB ZIP, after you confirm permission to use it)
+or an extracted release on Google Drive, builds the full 400-gloss manifest and
 the signer-disjoint 22/3/3 split first, then selects glosses by training
 recordings only (or an explicit `GLOSS_IDS` list) without re-splitting. Only the
 selected videos are copied into the runtime, re-validated with ffprobe and
@@ -56,6 +58,26 @@ uv run ss-select-classes --manifest data/manifests/vsl400.parquet --output-root 
 ```
 
 See [the VSL400 pose contract](docs/vsl400_pose.md) for details.
+
+## VSL400 pose branch on MediaPipe keypoints
+
+[Notebook 12](notebooks/12_vsl400_mediapipe_pose_transformer.ipynb) trains the
+pose branch of the RGB–pose design (Graph Encoder with 2 graph blocks, Spatial
+Transformer 2 × 4 heads, joint pooling, Temporal Transformer 3 × 4 heads,
+256-d pose embedding) on 70 VSL400 glosses, front view. It reads the MediaPipe
+Holistic keypoints already extracted in the Kaggle redistribution (after you
+confirm permission), rebuilds the project's signer-disjoint split from the
+VSL400 metadata, and saves the manifest, packed keypoints, checkpoints,
+predictions, metrics and figures to Google Drive. The same steps are available
+locally:
+
+```powershell
+uv run ss-fetch-vsl400-kaggle keypoints --manifest data/subsets/vsl400_top70/manifest.csv --output data/subsets/vsl400_top70/mediapipe76_front.npz
+uv run ss-train-pose-transformer --manifest data/subsets/vsl400_top70/manifest.csv `
+  --keypoints data/subsets/vsl400_top70/mediapipe76_front.npz --output-root artifacts/runs/pose_top70
+```
+
+See [the MediaPipe pose-branch contract](docs/vsl400_mediapipe_pose.md).
 
 ## Implemented milestone: VSL400 preparation
 
