@@ -260,7 +260,8 @@ def train_pose_transformer(
         train_set.set_epoch(epoch)
         loader = _loader(train_set, training, shuffle=True, seed=training.seed + epoch)
         model.train()
-        total_loss, correct, seen = 0.0, 0, 0
+        total_loss, seen = 0.0, 0
+        train_probabilities, train_targets = [], []
         for features, joint_mask, frame_mask, target in loader:
             features, joint_mask = features.to(device), joint_mask.to(device)
             frame_mask, target = frame_mask.to(device), target.to(device)
@@ -276,8 +277,13 @@ def train_pose_transformer(
             scaler.update()
             scheduler.step()
             total_loss += float(loss.detach()) * len(target)
-            correct += int((logits.argmax(dim=1) == target).sum())
             seen += len(target)
+            train_probabilities.append(torch.softmax(logits.detach().float(), dim=1).cpu().numpy())
+            train_targets.append(target.cpu().numpy())
+        # Running metrics on augmented batches with dropout active, as usual for training curves.
+        train_metrics = classification_metrics(
+            np.concatenate(train_targets), np.concatenate(train_probabilities).astype(np.float64)
+        )
 
         validation = _evaluate(
             model, eval_sets["validation"], training, adjacency, device, criterion
@@ -290,7 +296,9 @@ def train_pose_transformer(
         record = {
             "epoch": epoch + 1,
             "train_loss": total_loss / seen,
-            "train_top1": correct / seen,
+            "train_top1": train_metrics["top1_accuracy"],
+            "train_top5": train_metrics["top5_accuracy"],
+            "train_macro_f1": train_metrics["macro_f1"],
             "validation_loss": validation["loss"],
             "validation_top1": validation["metrics"]["top1_accuracy"],
             "validation_top5": validation["metrics"]["top5_accuracy"],

@@ -6,6 +6,11 @@ Transformer) on 70 VSL400 glosses, front view, using MediaPipe keypoints that th
 uploader already extracted. It is the fast path to a working end-to-end model; the RTMPose
 three-view pipeline (notebook 11) remains the controlled alternative.
 
+[Notebook 14](../notebooks/14_vsl400_mediapipe_pose_transformer_top200.ipynb) is the same
+notebook for 200 glosses; only `CLASS_COUNT` differs. It uses the same signer split and the
+same ranking, so its first 70 glosses are the notebook-12 glosses, with the same class
+indices. It writes to its own folder, `subsets/top200_front_mediapipe/`.
+
 ## Data
 
 - Source: Kaggle `nguyenanfms/vsl-vietnamese-sign-language-v2`, version 8, a third-party
@@ -28,9 +33,11 @@ three-view pipeline (notebook 11) remains the controlled alternative.
 
 Signer IDs are not in the keypoint files, so the notebook reads the VSL400 metadata JSONs of
 the seven raw parts from the same archive, builds the full 400-gloss manifest and creates the
-project's signer-disjoint 80/10/10 split (22 / 3 / 3 signers, seed 42; shared with notebook
-11). `ss-select-classes --classes 70` then keeps the 70 glosses with the most training
-recordings that occur in every split, without re-splitting.
+project's signer-disjoint 80/10/10 split (seed 42; shared with notebook 11). The Kaggle v8
+metadata has 26 signer IDs (005 and 017 are absent), which gives 21 / 3 / 2 signers and
+19,779 / 2,515 / 2,459 recordings. `ss-select-classes --classes 70` then keeps the 70
+glosses with the most training recordings that occur in every split, without re-splitting
+(`--classes 400` keeps all glosses, ranked the same way).
 
 `ss-fetch-vsl400-kaggle keypoints` matches each front-view clip to a keypoint file by video
 ID **and** gloss folder (Unicode-normalized), skipping the uploader's internet-sourced clips
@@ -77,6 +84,24 @@ The best checkpoint is evaluated on validation, and on test only with `--run-tes
 (`RUN_TEST` in the notebook). Outputs: `report.json`, `history.json`,
 `predictions_<split>.csv` (with top-5), `per_class_<split>.csv`, `confusion_<split>.csv` and
 figures.
+
+## Training curves
+
+`history.json` records, per epoch, train and validation loss, top-1, top-5 and macro-F1,
+the learning rate and the epoch time. Train values are running metrics over augmented
+batches with dropout active, so they understate accuracy on clean training clips.
+`ss-plot-training --run-root <run>` (or notebook step 6a, which also works mid-training)
+draws a 2 × 3 figure — loss, top-1 with chance level, top-5, macro-F1, generalization gap
+and learning rate, with the best epoch marked — and writes `training_summary.json` with
+heuristic findings:
+
+| Finding | Rule |
+| --- | --- |
+| `overfitting` | ≥ 3 epochs after the best, validation loss up > 5 % while train loss down > 5 % |
+| `large_generalization_gap` | train − validation top-1 > 0.25 at the best epoch |
+| `underfitting` | train top-1 < 0.5 at the best epoch with a gap < 0.1 |
+| `still_improving` | all requested epochs used and the best epoch is one of the last two |
+| `noisy_validation` | validation top-1 moves > 5 points per epoch beyond its trend (last 10 epochs) |
 
 ## Verification status
 

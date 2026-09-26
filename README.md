@@ -77,7 +77,9 @@ uv run ss-train-pose-transformer --manifest data/subsets/vsl400_top70/manifest.c
   --keypoints data/subsets/vsl400_top70/mediapipe76_front.npz --output-root artifacts/runs/pose_top70
 ```
 
-See [the MediaPipe pose-branch contract](docs/vsl400_mediapipe_pose.md).
+[Notebook 14](notebooks/14_vsl400_mediapipe_pose_transformer_top200.ipynb) runs the
+same pipeline for 200 glosses. See
+[the MediaPipe pose-branch contract](docs/vsl400_mediapipe_pose.md).
 
 ## Implemented milestone: VSL400 preparation
 

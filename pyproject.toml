@@ -37,6 +37,7 @@ ss-check-graph-encoder = "silent_signal.cli.check_graph_encoder:entrypoint"
 ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
 ss-fetch-vsl400-kaggle = "silent_signal.cli.fetch_vsl400_kaggle:entrypoint"
 ss-train-pose-transformer = "silent_signal.cli.train_pose_transformer:entrypoint"
+ss-plot-training = "silent_signal.cli.plot_training:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]
@@ -64,5 +65,5 @@ packages = ["silent_signal"]
 exclude = ["src/silent_signal/(models|pose|training|evaluation|inference|export|api)/"]
 
 [[tool.mypy.overrides]]
-module = ["pyarrow", "pyarrow.*"]
+module = ["pyarrow", "pyarrow.*", "matplotlib", "matplotlib.*"]
 ignore_missing_imports = true
