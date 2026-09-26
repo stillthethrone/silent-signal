@@ -28,9 +28,11 @@ three-view pipeline (notebook 11) remains the controlled alternative.
 
 Signer IDs are not in the keypoint files, so the notebook reads the VSL400 metadata JSONs of
 the seven raw parts from the same archive, builds the full 400-gloss manifest and creates the
-project's signer-disjoint 80/10/10 split (22 / 3 / 3 signers, seed 42; shared with notebook
-11). `ss-select-classes --classes 70` then keeps the 70 glosses with the most training
-recordings that occur in every split, without re-splitting.
+project's signer-disjoint 80/10/10 split (seed 42; shared with notebook 11). The Kaggle v8
+metadata has 26 signer IDs (005 and 017 are absent), which gives 21 / 3 / 2 signers and
+19,779 / 2,515 / 2,459 recordings. `ss-select-classes --classes 70` then keeps the 70
+glosses with the most training recordings that occur in every split, without re-splitting
+(`--classes 400` keeps all glosses, ranked the same way).
 
 `ss-fetch-vsl400-kaggle keypoints` matches each front-view clip to a keypoint file by video
 ID **and** gloss folder (Unicode-normalized), skipping the uploader's internet-sourced clips
