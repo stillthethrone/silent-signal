@@ -6,10 +6,12 @@ Transformer) on 70 VSL400 glosses, front view, using MediaPipe keypoints that th
 uploader already extracted. It is the fast path to a working end-to-end model; the RTMPose
 three-view pipeline (notebook 11) remains the controlled alternative.
 
-[Notebook 15](../notebooks/15_vsl400_mediapipe_pose_transformer_all400.ipynb) is the same
-notebook for all 400 glosses; only `CLASS_COUNT` differs. It uses the same signer split and
-the same ranking, so its first 70 glosses are the notebook-12 glosses, with the same class
-indices. It writes to its own folder, `subsets/top400_front_mediapipe/`.
+[Notebook 14](../notebooks/14_vsl400_mediapipe_pose_transformer_top200.ipynb) (200 glosses) and
+[notebook 15](../notebooks/15_vsl400_mediapipe_pose_transformer_all400.ipynb) (all 400 glosses)
+are the same notebook; only `CLASS_COUNT` differs. They use the same signer split and the
+same ranking, so their first 70 glosses are the notebook-12 glosses, with the same class
+indices. Each writes to its own folder: `subsets/top200_front_mediapipe/` and
+`subsets/top400_front_mediapipe/`.
 
 ## Data
 
