@@ -216,6 +216,7 @@ def selection_payload(
     min_official_train_samples: int,
     validation_fraction: float,
     seed: int,
+    requested_classes: int | None = None,
 ) -> Mapping[str, Any]:
     return {
         "schema_version": 1,
@@ -224,7 +225,12 @@ def selection_payload(
         "source_joint_shape": ["T", 76, 3],
         "graph_layout": "mediapipe_upper68_v1",
         "ignored_source_indices": list(range(25, 33)),
-        "selection_strategy": "descending_official_train_count_then_gloss",
+        "selection_strategy": (
+            "all_eligible_glosses_descending_official_train_count_then_gloss"
+            if requested_classes == 0
+            else "descending_official_train_count_then_gloss"
+        ),
+        "requested_classes": requested_classes,
         "min_official_train_samples": min_official_train_samples,
         "split_protocol": "provided_test_plus_stratified_sample_validation",
         "validation_fraction_of_official_train": validation_fraction,

@@ -41,7 +41,10 @@ ss-prepare-multi-vsl = "silent_signal.cli.prepare_multi_vsl_demo:entrypoint"
 ss-prepare-multi-vsl-pose = "silent_signal.cli.prepare_multi_vsl_pose:entrypoint"
 ss-select-classes = "silent_signal.cli.select_classes:entrypoint"
 ss-fetch-kaggle-vsl-mediapipe = "silent_signal.cli.fetch_kaggle_vsl_mediapipe:entrypoint"
+ss-fetch-kaggle-vsl-rgb = "silent_signal.cli.fetch_kaggle_vsl_rgb:entrypoint"
 ss-prepare-kaggle-vsl-mediapipe = "silent_signal.cli.prepare_kaggle_vsl_mediapipe:entrypoint"
+ss-extract-videomae-features = "silent_signal.cli.extract_videomae_features:entrypoint"
+ss-train-rgb-pose-fusion = "silent_signal.cli.train_rgb_pose_fusion:entrypoint"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/silent_signal"]

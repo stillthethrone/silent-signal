@@ -1,8 +1,9 @@
 """Extract selected members of a remote ZIP through HTTP Range requests.
 
-Only the central directory and the byte ranges of the requested members are downloaded,
-so a few gigabytes can be taken from a much larger archive without storing it. Each
-member is decompressed, CRC-checked and published atomically; a rerun skips files whose
+Only the central directory and byte ranges covering requested members are downloaded,
+so a few gigabytes can be taken from a much larger archive without storing it. Callers
+may fetch one range per member or coalesce adjacent records into bounded spans. Every
+member is decompressed, CRC-checked and published atomically; reruns skip files whose
 size and CRC already match. No network request runs on import.
 """
 
@@ -47,6 +48,37 @@ class RemoteIdentity:
 
     size: int
     etag: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteZipDirectory:
+    """Validated central-directory metadata for one remote ZIP archive."""
+
+    members: tuple[zipfile.ZipInfo, ...]
+    start_dir: int
+
+
+@dataclass(frozen=True, slots=True)
+class _SelectedInterval:
+    item: zipfile.ZipInfo
+    target: Path
+    start: int
+    end: int
+
+    @property
+    def size(self) -> int:
+        return self.end - self.start + 1
+
+
+@dataclass(frozen=True, slots=True)
+class _RangeSpan:
+    start: int
+    end: int
+    intervals: tuple[_SelectedInterval, ...]
+
+    @property
+    def size(self) -> int:
+        return self.end - self.start + 1
 
 
 class RemoteArchive:
@@ -169,11 +201,14 @@ class _SequentialReader(io.RawIOBase):
         return self._cache[index]
 
 
-def list_members(archive: RemoteArchive) -> list[zipfile.ZipInfo]:
-    """Read the central directory and reject unsafe or unsupported entries."""
+def inspect_directory(archive: RemoteArchive) -> RemoteZipDirectory:
+    """Read and validate members plus the exact central-directory start offset."""
 
     with zipfile.ZipFile(_SequentialReader(archive)) as handle:
-        members = handle.infolist()
+        members = tuple(handle.infolist())
+        start_dir = handle.start_dir
+    if not 0 <= start_dir <= archive.identity.size:
+        raise RemoteZipError(f"Invalid ZIP central-directory offset: {start_dir}.")
     for item in members:
         path = PurePosixPath(item.filename)
         file_type = stat.S_IFMT(item.external_attr >> 16)
@@ -186,7 +221,17 @@ def list_members(archive: RemoteArchive) -> list[zipfile.ZipInfo]:
             or file_type not in (0, stat.S_IFREG, stat.S_IFDIR)
         ):
             raise RemoteZipError(f"Unsafe or encrypted ZIP member: {item.filename!r}")
-    return members
+        if not 0 <= item.header_offset < start_dir:
+            raise RemoteZipError(
+                f"ZIP member has an invalid local-header offset: {item.filename!r}"
+            )
+    return RemoteZipDirectory(members=members, start_dir=start_dir)
+
+
+def list_members(archive: RemoteArchive) -> list[zipfile.ZipInfo]:
+    """Read the central directory and reject unsafe or unsupported entries."""
+
+    return list(inspect_directory(archive).members)
 
 
 def extract_members(
@@ -234,6 +279,200 @@ def extract_members(
             if done % step == 0 or done == len(pending):
                 report(f"[zip] extracted {done:,}/{len(pending):,}")
     return {"kept": kept, "extracted": done}
+
+
+def extract_members_coalesced(
+    archive: RemoteArchive,
+    targets: Mapping[str, Path],
+    directory: RemoteZipDirectory,
+    *,
+    workers: int = 2,
+    reserve_bytes: int = 2 * 1024**3,
+    max_span_bytes: int = 128 * 1024**2,
+    max_gap_bytes: int = 4 * 1024**2,
+    report: Callable[[str], None] = print,
+) -> dict[str, int]:
+    """Extract selected members using a bounded number of coalesced Range GETs.
+
+    Local-record boundaries come from the next member's ``header_offset`` and the
+    exact central-directory start returned by :func:`inspect_directory`.  This
+    includes data descriptors without guessing their length.  Nearby pending
+    records are fetched in one bounded byte span, then independently decompressed,
+    CRC-checked and atomically published.
+    """
+
+    if workers < 1:
+        raise ValueError("workers must be positive.")
+    if max_span_bytes < 1:
+        raise ValueError("max_span_bytes must be positive.")
+    if max_gap_bytes < 0:
+        raise ValueError("max_gap_bytes must be non-negative.")
+
+    members = directory.members
+    if not 0 <= directory.start_dir <= archive.identity.size:
+        raise RemoteZipError(
+            f"Invalid ZIP central-directory offset: {directory.start_dir}."
+        )
+    by_name = {item.filename: item for item in members}
+    missing = sorted(set(targets) - by_name.keys())
+    if missing:
+        raise RemoteZipError(f"{len(missing)} requested members are absent; first: {missing[0]}")
+
+    ordered = sorted(members, key=lambda item: item.header_offset)
+    offsets = [item.header_offset for item in ordered]
+    if len(offsets) != len(set(offsets)):
+        raise RemoteZipError("ZIP members have duplicate local-header offsets.")
+    end_by_offset = {
+        item.header_offset: (
+            ordered[position + 1].header_offset - 1
+            if position + 1 < len(ordered)
+            else directory.start_dir - 1
+        )
+        for position, item in enumerate(ordered)
+    }
+
+    intervals: list[_SelectedInterval] = []
+    kept = 0
+    needed = 0
+    for name, target in targets.items():
+        item = by_name[name]
+        if item.is_dir():
+            raise RemoteZipError(f"Cannot extract a directory as a file: {name}")
+        if item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
+            raise RemoteZipError(f"Unsupported compression for {name}: {item.compress_type}")
+        if target.is_file() and _matches(target, item):
+            kept += 1
+            continue
+        end = end_by_offset[item.header_offset]
+        if end < item.header_offset:
+            raise RemoteZipError(f"Invalid local-record boundary for {name}.")
+        intervals.append(
+            _SelectedInterval(
+                item=item,
+                target=target,
+                start=item.header_offset,
+                end=end,
+            )
+        )
+        needed += item.file_size
+
+    intervals.sort(key=lambda interval: interval.start)
+    spans = _coalesced_spans(
+        intervals,
+        max_span_bytes=max_span_bytes,
+        max_gap_bytes=max_gap_bytes,
+    )
+    if intervals:
+        root = Path(os.path.commonpath([str(interval.target.parent) for interval in intervals]))
+        root.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(root).free
+        if free < needed + reserve_bytes:
+            required = (needed + reserve_bytes) / 1024**3
+            raise RemoteZipError(f"Need {required:.1f} GiB free, have {free / 1024**3:.1f} GiB.")
+
+    selected_record_bytes = sum(interval.size for interval in intervals)
+    range_bytes = sum(span.size for span in spans)
+    overfetch_bytes = range_bytes - selected_record_bytes
+    report(
+        f"[zip] kept {kept:,}; extracting {len(intervals):,} files in "
+        f"{len(spans):,} ranges ({range_bytes / 1024**3:.2f} GiB; "
+        f"overfetch {overfetch_bytes / 1024**2:.1f} MiB)"
+    )
+
+    done = 0
+    step = max(1, len(intervals) // 20)
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = [pool.submit(_extract_span, archive, span) for span in spans]
+        for future in as_completed(futures):
+            done += future.result()
+            if done % step == 0 or done == len(intervals):
+                report(f"[zip] extracted {done:,}/{len(intervals):,}")
+    return {
+        "kept": kept,
+        "extracted": done,
+        "range_requests": len(spans),
+        "range_bytes": range_bytes,
+        "selected_record_bytes": selected_record_bytes,
+        "overfetch_bytes": overfetch_bytes,
+    }
+
+
+def _coalesced_spans(
+    intervals: Sequence[_SelectedInterval],
+    *,
+    max_span_bytes: int,
+    max_gap_bytes: int,
+) -> tuple[_RangeSpan, ...]:
+    spans: list[_RangeSpan] = []
+    current: list[_SelectedInterval] = []
+    start = end = 0
+    for interval in intervals:
+        if not current:
+            current = [interval]
+            start, end = interval.start, interval.end
+            continue
+        gap = interval.start - end - 1
+        merged_size = interval.end - start + 1
+        if gap <= max_gap_bytes and merged_size <= max_span_bytes:
+            current.append(interval)
+            end = interval.end
+            continue
+        spans.append(_RangeSpan(start=start, end=end, intervals=tuple(current)))
+        current = [interval]
+        start, end = interval.start, interval.end
+    if current:
+        spans.append(_RangeSpan(start=start, end=end, intervals=tuple(current)))
+    return tuple(spans)
+
+
+def _extract_span(archive: RemoteArchive, span: _RangeSpan) -> int:
+    blob = archive.fetch(span.start, span.end)
+    for interval in span.intervals:
+        item = interval.item
+        offset = item.header_offset - span.start
+        if offset < 0 or offset + _LOCAL_HEADER.size > len(blob):
+            raise RemoteZipError(f"Missing local header for {item.filename} in fetched span.")
+        fields = _LOCAL_HEADER.unpack_from(blob, offset)
+        if fields[0] != _LOCAL_SIGNATURE:
+            raise RemoteZipError(f"Bad local header for {item.filename}.")
+        if fields[2] & 0x1 or fields[3] != item.compress_type:
+            raise RemoteZipError(f"Local header disagrees with metadata for {item.filename}.")
+        data_start = offset + _LOCAL_HEADER.size + fields[9] + fields[10]
+        data_end = data_start + item.compress_size
+        if span.start + data_end > interval.end + 1:
+            raise RemoteZipError(
+                f"Compressed payload crosses the local-record boundary for {item.filename}."
+            )
+        compressed = blob[data_start:data_end]
+        if len(compressed) != item.compress_size:
+            raise RemoteZipError(f"Truncated data for {item.filename}.")
+        try:
+            if item.compress_type == zipfile.ZIP_DEFLATED:
+                data = zlib.decompress(compressed, -zlib.MAX_WBITS)
+            else:
+                data = compressed
+        except zlib.error as exc:
+            raise RemoteZipError(f"Cannot decompress {item.filename}.") from exc
+        if len(data) != item.file_size or zlib.crc32(data) & 0xFFFFFFFF != item.CRC:
+            raise RemoteZipError(f"Size or CRC mismatch for {item.filename}.")
+        _write_atomic(interval.target, data)
+    return len(span.intervals)
+
+
+def _write_atomic(target: Path, data: bytes) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=target.parent, prefix=f".{target.name}.", delete=False
+        ) as handle:
+            handle.write(data)
+            temporary = Path(handle.name)
+        temporary.replace(target)
+    except OSError:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        raise
 
 
 def _extract_one(archive: RemoteArchive, item: zipfile.ZipInfo, target: Path) -> None:

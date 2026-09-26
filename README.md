@@ -99,6 +99,25 @@ uv run ss-select-classes --manifest data/manifests/vsl400.parquet --output-root 
 
 See [the VSL400 pose contract](docs/vsl400_pose.md) for details.
 
+## Kaggle VSL all-class RGB + MediaPipe fusion
+
+[Notebook 13](notebooks/13_kaggle_vsl_allclass_rgb_preparation.ipynb) builds a
+new manifest for every canonical class that has enough official-train samples
+to make train/validation and at least one official-test clip. It reuses the
+complete MediaPipe archive produced by notebook 11, downloads only matching
+cropped front-view RGB clips with resumable coalesced ZIP ranges, and freezes
+the pinned VideoMAE V2 Base backbone into compact `[8, 768]` float16 tokens.
+The actual class count is derived from the data; neither 70 nor 472 is assumed.
+
+[Notebook 14](notebooks/14_kaggle_vsl_allclass_rgb_pose_fusion_training.ipynb)
+trains a small pose Graph-Spatial-Temporal encoder and RGB temporal adapter with
+gated late fusion. It logs batch/epoch progress, uses class-balanced loss and
+modality dropout, stops on validation loss, restores the best checkpoint, and
+only then evaluates the official test split. Run notebook 13 once before
+notebook 14; subsequent runs reuse the Drive packs and resumable checkpoints.
+Because this public processed release has no signer IDs, its validation split
+is deterministic sample-disjoint, not signer-disjoint.
+
 ## Implemented milestone: VSL400 preparation
 
 - Parse the three synchronized camera metadata files into one stable manifest.

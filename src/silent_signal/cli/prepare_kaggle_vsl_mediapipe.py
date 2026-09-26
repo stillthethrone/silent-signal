@@ -127,6 +127,7 @@ def _build(args: argparse.Namespace) -> int:
         min_official_train_samples=args.min_official_train_samples,
         validation_fraction=args.validation_fraction,
         seed=args.seed,
+        requested_classes=args.classes,
     )
     write_json_atomic(args.selection, selection)
     report = {
