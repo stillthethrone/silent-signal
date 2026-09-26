@@ -6,6 +6,11 @@ Transformer) on 70 VSL400 glosses, front view, using MediaPipe keypoints that th
 uploader already extracted. It is the fast path to a working end-to-end model; the RTMPose
 three-view pipeline (notebook 11) remains the controlled alternative.
 
+[Notebook 14](../notebooks/14_vsl400_mediapipe_pose_transformer_top200.ipynb) is the same
+notebook for 200 glosses; only `CLASS_COUNT` differs. It uses the same signer split and the
+same ranking, so its first 70 glosses are the notebook-12 glosses, with the same class
+indices. It writes to its own folder, `subsets/top200_front_mediapipe/`.
+
 ## Data
 
 - Source: Kaggle `nguyenanfms/vsl-vietnamese-sign-language-v2`, version 8, a third-party
